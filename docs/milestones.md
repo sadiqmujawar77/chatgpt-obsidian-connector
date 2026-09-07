@@ -108,3 +108,41 @@ Obsidian Markdown documents with useful source metadata.
 ### Result
 
 **PASS**
+
+---
+
+## M005-005 — Conversation Relationships & Navigation
+
+**Status:** Complete
+
+### Objective
+
+Provide automatic navigation between conversations and maintain project-level conversation indexes.
+
+### Implementation
+
+- Automatically links each captured conversation to its previous conversation.
+- Automatically updates the previous conversation with its Next link.
+- Adds a Project link from each conversation to its project index.
+- Maintains conversation relationships within the selected project.
+- Automatically creates a project index when the first conversation is captured into a project that does not yet have one.
+- Automatically maintains the project index conversation table after each conversation capture.
+- Updates only the generated Related section when adding navigation links, preserving captured conversation content.
+- Orders project-index conversations by conversation ID.
+
+### Validation
+
+- Verified bidirectional navigation across the P001 conversation chain.
+- Verified P001-014 contains both Previous and Next links.
+- Verified P001-015 contains the correct Previous and Project links and no Next link.
+- Verified project indexes contain the expected conversation table.
+- Created P003 as a clean project-index test.
+- Verified automatic creation of P003 - Project Index.md.
+- Verified P003-001 appears automatically in the project-index conversation table.
+- Verified the generated project-index heading uses the correct UTF-8 em dash encoding.
+- Verified the actual file bytes contain the correct UTF-8 sequence E2 80 94.
+- Confirmed that the previously observed mojibake output was a PowerShell display/decoding issue rather than corruption in the generated Markdown file.
+
+### Result
+
+M005-005 passed functional validation and is complete.

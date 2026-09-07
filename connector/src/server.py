@@ -159,6 +159,250 @@ def next_conversation_id(project_id):
     return f"{project_id}-{highest + 1:03d}"
 
 
+def previous_conversation(project_id):
+    """
+    Return the most recently numbered conversation for a project.
+
+    Returns:
+        Path to the previous conversation file, or None if this
+        is the first conversation in the project.
+    """
+
+    chat_folder = chats_folder(project_id)
+
+    highest_number = 0
+    previous_path = None
+
+    for path in chat_folder.glob(
+        f"{project_id}-*.md"
+    ):
+
+        match = CONVERSATION_ID_PATTERN.match(
+            path.stem
+        )
+
+        if not match:
+            continue
+
+        matched_project_number = int(
+            match.group(1)
+        )
+
+        matched_conversation_number = int(
+            match.group(2)
+        )
+
+        project_number = int(
+            project_id[1:]
+        )
+
+        if matched_project_number != project_number:
+            continue
+
+        if matched_conversation_number > highest_number:
+
+            highest_number = (
+                matched_conversation_number
+            )
+
+            previous_path = path
+
+    return previous_path
+
+def update_next_link(
+    conversation_path,
+    next_link
+):
+    """
+    Update the Next link in an existing conversation.
+
+    Only the generated Related section at the end of the document
+    is modified.
+    """
+
+    content = conversation_path.read_text(
+        encoding="utf-8"
+    )
+
+    print(
+        f"Updating Next link: {conversation_path.name}"
+    )
+
+    related_marker = "\n## Related\n"
+
+    if related_marker not in content:
+
+        raise ValueError(
+            "conversation is missing Related section"
+        )
+
+    before_related, related_section = (
+        content.rsplit(
+            related_marker,
+            1
+        )
+    )
+
+    lines = related_section.splitlines()
+
+    next_line_found = False
+
+    for index, line in enumerate(lines):
+
+        if line.startswith("- Next:"):
+
+            lines[index] = (
+                f"- Next: [[{next_link}]]"
+            )
+
+            next_line_found = True
+
+            break
+
+    if not next_line_found:
+
+        lines.insert(
+            0,
+            f"- Next: [[{next_link}]]"
+        )
+
+    updated_content = (
+        before_related
+        + related_marker
+        + "\n".join(lines)
+        + "\n"
+    )
+
+    print(
+        f"Next link target: {next_link}"
+    )
+
+    conversation_path.write_text(
+        updated_content,
+        encoding="utf-8"
+    )
+
+def update_project_index(project_id):
+    project_path = project_folder(project_id)
+
+    index_path = (
+        project_path
+        / f"{project_id} - Project Index.md"
+    )
+
+    chat_folder = chats_folder(project_id)
+    conversations = []
+
+    for chat_path in chat_folder.glob(
+        f"{project_id}-*.md"
+    ):
+        match = CONVERSATION_ID_PATTERN.fullmatch(
+            chat_path.stem
+        )
+
+        if not match:
+            continue
+
+        conversation_number = int(match.group(2))
+        conversation_id = f"{project_id}-{conversation_number:03d}"
+        title = chat_path.stem[len(conversation_id) + 3:]
+
+        conversations.append(
+            (
+                conversation_number,
+                conversation_id,
+                title,
+                chat_path.stem
+            )
+        )
+
+    conversations.sort(key=lambda item: item[0])
+
+    table_lines = [
+        "| ID | Title | Status |",
+        "|---|---|---|"
+    ]
+
+    for _, conversation_id, title, stem in conversations:
+        table_lines.append(
+            f"| [[{stem}]] | {title} | Captured |"
+        )
+
+    if index_path.exists():
+        existing = index_path.read_text(encoding="utf-8")
+        conversations_marker = "## Conversations"
+
+        if conversations_marker in existing:
+            before, remainder = existing.split(
+                conversations_marker,
+                1
+            )
+
+            next_section = re.search(
+                r"\n## (?!#)",
+                remainder
+            )
+
+            if next_section:
+                after = remainder[next_section.start():]
+                updated = (
+                    before
+                    + conversations_marker
+                    + "\n\n"
+                    + "\n".join(table_lines)
+                    + "\n"
+                    + after
+                )
+            else:
+                updated = (
+                    before
+                    + conversations_marker
+                    + "\n\n"
+                    + "\n".join(table_lines)
+                    + "\n"
+                )
+        else:
+            updated = (
+                existing.rstrip()
+                + "\n\n## Conversations\n\n"
+                + "\n".join(table_lines)
+                + "\n"
+            )
+    else:
+        project_name = (
+            project_path.name.split(" - ", 1)[1]
+            if " - " in project_path.name
+            else project_path.name
+        )
+
+        today = date.today().isoformat()
+
+        updated = "\n".join([
+            "---",
+            f"id: {project_id}",
+            f"title: {project_name}",
+            "type: project",
+            "status: active",
+            f"date: {today}",
+            "tags:",
+            "  - project",
+            "  - chatgpt",
+            "  - obsidian",
+            "---",
+            "",
+            f"# {project_id} — {project_name}",
+            "",
+            "## Conversations",
+            "",
+            *table_lines,
+            ""
+        ])
+
+    index_path.write_text(updated, encoding="utf-8")
+
+    print(f"Project index updated: {index_path}")
+    print(f"Conversation entries: {len(conversations)}")
+
 def sanitize_title(title):
     title = title.strip()
 
@@ -190,7 +434,10 @@ def build_conversation_markdown(
     title,
     project_id,
     url,
-    messages
+    messages,
+    previous_link=None,
+    next_link=None,
+    project_link=None
 ):
 
     today = date.today().isoformat()
@@ -254,12 +501,25 @@ def build_conversation_markdown(
 
     lines.extend([
         "## Related",
-        "",
-        "- Previous",
-        "- Next",
-        "- Project",
         ""
     ])
+
+    if previous_link:
+        lines.append(
+            f"- Previous: [[{previous_link}]]"
+        )
+
+    if next_link:
+        lines.append(
+            f"- Next: [[{next_link}]]"
+        )
+
+    if project_link:
+        lines.append(
+            f"- Project: [[{project_link}]]"
+        )
+
+    lines.append("")
 
     return "\n".join(lines)
 
@@ -974,6 +1234,10 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 )
             )
 
+            previous_path = previous_conversation(
+                project_id
+            )
+
 
             conversation_id = (
                 next_conversation_id(
@@ -986,6 +1250,11 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 title
             )
 
+            previous_link = None
+
+            if previous_path:
+
+                previous_link = previous_path.stem
 
             markdown = (
                 build_conversation_markdown(
@@ -993,7 +1262,9 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                     clean_title,
                     project_id,
                     url,
-                    messages
+                    messages,
+                    previous_link=previous_link,
+                    project_link=f"{project_id} - Project Index"
                 )
             )
 
@@ -1016,6 +1287,19 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 project_folder_path / "Chats",
                 filename,
                 markdown
+            )
+
+            if previous_path:
+
+
+                update_next_link(
+                previous_path,
+                destination.stem
+            )
+
+
+            update_project_index(
+                project_id
             )
 
 
