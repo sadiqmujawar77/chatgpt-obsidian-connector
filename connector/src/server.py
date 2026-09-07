@@ -189,6 +189,7 @@ def build_conversation_markdown(
     conversation_id,
     title,
     project_id,
+    url,
     messages
 ):
 
@@ -206,6 +207,7 @@ def build_conversation_markdown(
         "  - chatgpt",
         "  - obsidian",
         "source: ChatGPT",
+        f"url: {url}",
         "---",
         "",
         f"# {conversation_id} — {title}",
@@ -990,6 +992,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                     conversation_id,
                     clean_title,
                     project_id,
+                    url,
                     messages
                 )
             )

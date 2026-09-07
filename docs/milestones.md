@@ -74,3 +74,37 @@ during conversation capture.
 ### Result
 
 **PASS**
+
+---
+
+## M005-004 — Conversation Document Quality
+
+**Status:** Complete
+
+### Objective
+
+Ensure captured ChatGPT conversations are stored as clean, self-contained
+Obsidian Markdown documents with useful source metadata.
+
+### Implementation
+
+- Added the original ChatGPT conversation URL to YAML frontmatter.
+- Updated conversation Markdown generation to receive the conversation URL.
+- Preserved existing conversation structure and metadata.
+- Continued using UTF-8 encoding for generated Markdown files.
+
+### Validation
+
+- Captured a real conversation as `P001-008`.
+- Verified the generated Markdown file in the Obsidian vault.
+- Verified the `url` property is present in YAML frontmatter.
+- Verified the ChatGPT URL is recognized by Obsidian as a clickable property.
+- Verified YAML frontmatter is correctly interpreted by Obsidian.
+- Verified UTF-8 encoding by inspecting the generated file bytes.
+- Verified the em dash renders correctly in Obsidian.
+- Verified the conversation Markdown renders correctly.
+- Verified temporary test project artifacts were not present in the project directory.
+
+### Result
+
+**PASS**
