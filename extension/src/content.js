@@ -832,6 +832,404 @@ function createSaveButton() {
         "ChatGPT Obsidian Connector: Save button added."
     );
 }
+// ------------------------------------------------------------
+// Project selection
+// ------------------------------------------------------------
+
+function selectProject() {
+
+    return new Promise((resolve, reject) => {
+
+        console.log(
+            "ChatGPT Obsidian Connector: loading projects..."
+        );
+
+        chrome.runtime.sendMessage(
+            {
+                action: "projects"
+            },
+            response => {
+
+                if (
+                    chrome.runtime.lastError
+                ) {
+                    console.error(
+                        "ChatGPT Obsidian Connector: project request failed",
+                        chrome.runtime.lastError
+                    );
+
+                    reject(
+                        new Error(
+                            chrome.runtime.lastError.message
+                        )
+                    );
+
+                    return;
+                }
+
+
+                if (
+                    !response ||
+                    !response.ok ||
+                    !response.data?.projects
+                ) {
+                    console.error(
+                        "ChatGPT Obsidian Connector: invalid project response",
+                        response
+                    );
+
+                    reject(
+                        new Error(
+                            "Unable to load projects."
+                        )
+                    );
+
+                    return;
+                }
+
+
+                const projects =
+                    response.data.projects;
+
+
+                if (!projects.length) {
+
+                    reject(
+                        new Error(
+                            "No projects found."
+                        )
+                    );
+
+                    return;
+                }
+
+
+                // ------------------------------------------------
+                // Overlay
+                // ------------------------------------------------
+
+                const overlay =
+                    document.createElement("div");
+
+                overlay.id =
+                    "chatgpt-obsidian-project-overlay";
+
+
+                overlay.style.position =
+                    "fixed";
+
+                overlay.style.inset =
+                    "0";
+
+                overlay.style.zIndex =
+                    "2147483647";
+
+                overlay.style.background =
+                    "rgba(0, 0, 0, 0.55)";
+
+                overlay.style.display =
+                    "flex";
+
+                overlay.style.alignItems =
+                    "center";
+
+                overlay.style.justifyContent =
+                    "center";
+
+
+                // ------------------------------------------------
+                // Dialog
+                // ------------------------------------------------
+
+                const dialog =
+                    document.createElement("div");
+
+                dialog.style.width =
+                    "360px";
+
+                dialog.style.maxWidth =
+                    "calc(100vw - 40px)";
+
+                dialog.style.padding =
+                    "24px";
+
+                dialog.style.borderRadius =
+                    "12px";
+
+                dialog.style.background =
+                    "#202123";
+
+                dialog.style.color =
+                    "#ffffff";
+
+                dialog.style.fontFamily =
+                    '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+
+                dialog.style.boxShadow =
+                    "0 10px 40px rgba(0, 0, 0, 0.4)";
+
+
+                // ------------------------------------------------
+                // Title
+                // ------------------------------------------------
+
+                const title =
+                    document.createElement("div");
+
+                title.textContent =
+                    "Save conversation";
+
+                title.style.fontSize =
+                    "18px";
+
+                title.style.fontWeight =
+                    "600";
+
+                title.style.marginBottom =
+                    "8px";
+
+
+                // ------------------------------------------------
+                // Description
+                // ------------------------------------------------
+
+                const description =
+                    document.createElement("div");
+
+                description.textContent =
+                    "Select the project where this conversation should be saved.";
+
+                description.style.fontSize =
+                    "14px";
+
+                description.style.lineHeight =
+                    "1.4";
+
+                description.style.color =
+                    "#c7c7c7";
+
+                description.style.marginBottom =
+                    "16px";
+
+
+                // ------------------------------------------------
+                // Select
+                // ------------------------------------------------
+
+                const select =
+                    document.createElement("select");
+
+                select.style.width =
+                    "100%";
+
+                select.style.padding =
+                    "10px 12px";
+
+                select.style.border =
+                    "1px solid #555";
+
+                select.style.borderRadius =
+                    "8px";
+
+                select.style.background =
+                    "#2b2d31";
+
+                select.style.color =
+                    "#ffffff";
+
+                select.style.fontSize =
+                    "14px";
+
+                select.style.boxSizing =
+                    "border-box";
+
+
+                projects.forEach(
+                    project => {
+
+                        const option =
+                            document.createElement("option");
+
+                        option.value =
+                            project.id;
+
+                        option.textContent =
+                            project.name ||
+                            project.id;
+
+                        select.appendChild(
+                            option
+                        );
+                    }
+                );
+
+
+                // ------------------------------------------------
+                // Buttons
+                // ------------------------------------------------
+
+                const buttons =
+                    document.createElement("div");
+
+                buttons.style.display =
+                    "flex";
+
+                buttons.style.justifyContent =
+                    "flex-end";
+
+                buttons.style.gap =
+                    "8px";
+
+                buttons.style.marginTop =
+                    "20px";
+
+
+                const cancelButton =
+                    document.createElement("button");
+
+                cancelButton.type =
+                    "button";
+
+                cancelButton.textContent =
+                    "Cancel";
+
+                cancelButton.style.padding =
+                    "9px 14px";
+
+                cancelButton.style.border =
+                    "1px solid #555";
+
+                cancelButton.style.borderRadius =
+                    "8px";
+
+                cancelButton.style.background =
+                    "transparent";
+
+                cancelButton.style.color =
+                    "#ffffff";
+
+                cancelButton.style.cursor =
+                    "pointer";
+
+
+                const saveButton =
+                    document.createElement("button");
+
+                saveButton.type =
+                    "button";
+
+                saveButton.textContent =
+                    "Save";
+
+                saveButton.style.padding =
+                    "9px 14px";
+
+                saveButton.style.border =
+                    "none";
+
+                saveButton.style.borderRadius =
+                    "8px";
+
+                saveButton.style.background =
+                    "#2f6fed";
+
+                saveButton.style.color =
+                    "#ffffff";
+
+                saveButton.style.fontWeight =
+                    "600";
+
+                saveButton.style.cursor =
+                    "pointer";
+
+
+                // ------------------------------------------------
+                // Cancel
+                // ------------------------------------------------
+
+                cancelButton.addEventListener(
+                    "click",
+                    () => {
+
+                        overlay.remove();
+
+                        resolve(null);
+                    }
+                );
+
+
+                // ------------------------------------------------
+                // Save
+                // ------------------------------------------------
+
+                saveButton.addEventListener(
+                    "click",
+                    () => {
+
+                        const projectId =
+                            select.value;
+
+                        overlay.remove();
+
+                        resolve(
+                            projectId
+                        );
+                    }
+                );
+
+
+                // ------------------------------------------------
+                // Assemble dialog
+                // ------------------------------------------------
+
+                buttons.appendChild(
+                    cancelButton
+                );
+
+                buttons.appendChild(
+                    saveButton
+                );
+
+                dialog.appendChild(
+                    title
+                );
+
+                dialog.appendChild(
+                    description
+                );
+
+                dialog.appendChild(
+                    select
+                );
+
+                dialog.appendChild(
+                    buttons
+                );
+
+                overlay.appendChild(
+                    dialog
+                );
+
+                document.body.appendChild(
+                    overlay
+                );
+
+
+                // ------------------------------------------------
+                // Focus
+                // ------------------------------------------------
+
+                select.focus();
+
+
+                console.log(
+                    "ChatGPT Obsidian Connector: project selector displayed.",
+                    projects
+                );
+            }
+        );
+    });
+}
 
 
 // ------------------------------------------------------------
@@ -841,14 +1239,13 @@ function createSaveButton() {
 function saveCurrentConversation(button) {
 
     // Prevent accidental double-clicks.
-
     if (button.disabled) {
         return;
     }
 
 
     // --------------------------------------------------------
-    // Saving state
+    // Selecting project state
     // --------------------------------------------------------
 
     button.disabled = true;
@@ -860,12 +1257,103 @@ function saveCurrentConversation(button) {
         "0.7";
 
     button.textContent =
-        "Saving…";
+        "Selecting project…";
 
 
     console.log(
-        "ChatGPT Obsidian Connector: saving conversation..."
+        "ChatGPT Obsidian Connector: selecting project..."
     );
+
+
+    // --------------------------------------------------------
+    // Select project
+    // --------------------------------------------------------
+
+    selectProject()
+        .then(projectId => {
+
+            // User cancelled.
+            if (!projectId) {
+
+                button.disabled = false;
+
+                button.style.cursor =
+                    "pointer";
+
+                button.style.opacity =
+                    "1";
+
+                button.textContent =
+                    "Save to Obsidian";
+
+                return;
+            }
+
+
+            continueSavingConversation(
+                button,
+                projectId
+            );
+        })
+        .catch(error => {
+
+            console.error(
+                "ChatGPT Obsidian Connector: unable to load projects",
+                error
+            );
+
+
+            button.disabled = false;
+
+            button.style.cursor =
+                "pointer";
+
+            button.style.opacity =
+                "1";
+
+            button.textContent =
+                "⚠ Connector unavailable";
+
+            button.style.background =
+                "#d73a49";
+
+
+            setTimeout(
+                () => {
+
+                    button.textContent =
+                        "Save to Obsidian";
+
+                    button.style.background =
+                        "#2f6fed";
+                },
+                4000
+            );
+        });
+}
+
+
+// ------------------------------------------------------------
+// Continue saving after project selection
+// ------------------------------------------------------------
+
+function continueSavingConversation(
+    button,
+    projectId
+) {
+
+    console.log(
+        "ChatGPT Obsidian Connector: saving to project",
+        projectId
+    );
+
+
+    // --------------------------------------------------------
+    // Saving state
+    // --------------------------------------------------------
+
+    button.textContent =
+        "Saving…";
 
 
     // --------------------------------------------------------
@@ -874,6 +1362,11 @@ function saveCurrentConversation(button) {
 
     const conversation =
         extractConversation();
+
+
+    // Attach selected project.
+    conversation.project =
+        projectId;
 
 
     // --------------------------------------------------------
@@ -898,9 +1391,11 @@ function saveCurrentConversation(button) {
         button.style.background =
             "#d73a49";
 
+
         console.error(
             "ChatGPT Obsidian Connector: no messages found."
         );
+
 
         setTimeout(
             () => {
@@ -910,10 +1405,10 @@ function saveCurrentConversation(button) {
 
                 button.style.background =
                     "#2f6fed";
-
             },
             3000
         );
+
 
         return;
     }
@@ -929,6 +1424,23 @@ function saveCurrentConversation(button) {
             data: conversation
         },
         response => {
+
+            if (
+                chrome.runtime.lastError
+            ) {
+
+                console.error(
+                    "ChatGPT Obsidian Connector: save request failed",
+                    chrome.runtime.lastError
+                );
+
+                response = {
+                    ok: false,
+                    error:
+                        chrome.runtime.lastError.message
+                };
+            }
+
 
             console.log(
                 "ChatGPT Obsidian Connector: save response",
@@ -962,13 +1474,16 @@ function saveCurrentConversation(button) {
                 const id =
                     response.data?.id;
 
+
                 button.textContent =
                     id
                         ? `✓ Saved ${id}`
                         : "✓ Saved to Obsidian";
 
+
                 button.style.background =
                     "#238636";
+
 
                 setTimeout(
                     () => {
@@ -978,10 +1493,10 @@ function saveCurrentConversation(button) {
 
                         button.style.background =
                             "#2f6fed";
-
                     },
                     3000
                 );
+
 
                 return;
             }
@@ -1003,10 +1518,12 @@ function saveCurrentConversation(button) {
                 button.style.background =
                     "#d73a49";
 
+
                 console.error(
                     "ChatGPT Obsidian Connector: connector unavailable",
                     response
                 );
+
 
                 setTimeout(
                     () => {
@@ -1016,10 +1533,10 @@ function saveCurrentConversation(button) {
 
                         button.style.background =
                             "#2f6fed";
-
                     },
                     4000
                 );
+
 
                 return;
             }
@@ -1035,10 +1552,12 @@ function saveCurrentConversation(button) {
             button.style.background =
                 "#d73a49";
 
+
             console.error(
                 "ChatGPT Obsidian Connector: save failed",
                 response
             );
+
 
             setTimeout(
                 () => {
@@ -1048,7 +1567,6 @@ function saveCurrentConversation(button) {
 
                     button.style.background =
                         "#2f6fed";
-
                 },
                 3000
             );
@@ -1094,3 +1612,4 @@ if (
 console.log(
     "ChatGPT Obsidian Connector content script loaded."
 );
+
