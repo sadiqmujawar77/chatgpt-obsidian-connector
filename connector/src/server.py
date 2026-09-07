@@ -11,7 +11,9 @@ HOST = "127.0.0.1"
 PORT = 8765
 
 
-VAULT = Path(r"C:\Users\Sadiq\iCloudDrive\iCloud~md~obsidian")
+VAULT = Path(
+    r"C:\Users\Sadiq\iCloudDrive\iCloud~md~obsidian"
+)
 
 
 PROJECTS_FOLDER = (
@@ -435,6 +437,13 @@ class ConnectorHandler(BaseHTTPRequestHandler):
             return
 
 
+        if self.path == "/projects":
+
+            self.handle_create_project()
+
+            return
+
+
         if self.path == "/conversation":
 
             self.handle_conversation()
@@ -510,6 +519,179 @@ class ConnectorHandler(BaseHTTPRequestHandler):
             )
 
 
+    def handle_create_project(self):
+        try:
+            data = self.read_json_body()
+
+            name = data.get("name")
+
+            if not isinstance(name, str):
+                self.send_json(
+                    400,
+                    {"error": "project name must be a string"}
+                )
+                return
+
+            name = name.strip()
+
+            if not name:
+                self.send_json(
+                    400,
+                    {"error": "project name is required"}
+                )
+                return
+
+            if len(name) > 100:
+                self.send_json(
+                    400,
+                    {"error": "project name is too long"}
+                )
+                return
+
+            if any(
+                character in name
+                for character in '<>:"/\\|?*'
+            ):
+                self.send_json(
+                    400,
+                    {
+                        "error":
+                        "project name contains invalid Windows filename characters"
+                    }
+                )
+                return
+
+            if name.endswith(".") or name.endswith(" "):
+                self.send_json(
+                    400,
+                    {
+                        "error":
+                        "project name cannot end with a space or period"
+                    }
+                )
+                return
+
+            reserved_names = {
+                "CON",
+                "PRN",
+                "AUX",
+                "NUL",
+                *(f"COM{i}" for i in range(1, 10)),
+                *(f"LPT{i}" for i in range(1, 10)),
+            }
+
+            if name.upper() in reserved_names:
+                self.send_json(
+                    400,
+                    {
+                        "error":
+                        "project name is a reserved Windows filename"
+                    }
+                )
+                return
+
+            PROJECTS_FOLDER.mkdir(
+                parents=True,
+                exist_ok=True
+            )
+
+            numbers = []
+
+            for path in PROJECTS_FOLDER.iterdir():
+                if not path.is_dir():
+                    continue
+
+                match = re.match(
+                    r"^P(\d{3,})\s+-\s+",
+                    path.name
+                )
+
+                if match:
+                    numbers.append(
+                        int(match.group(1))
+                    )
+
+            next_number = max(
+                numbers,
+                default=0
+            ) + 1
+
+            project_id = f"P{next_number:03d}"
+
+            project_folder_name = (
+                f"{project_id} - {name}"
+            )
+
+            project_path = (
+                PROJECTS_FOLDER /
+                project_folder_name
+            )
+
+            chats_path = (
+                project_path /
+                "Chats"
+            )
+
+            try:
+                project_path.mkdir(
+                    parents=False,
+                    exist_ok=False
+                )
+
+                chats_path.mkdir(
+                    parents=False,
+                    exist_ok=False
+                )
+
+            except Exception:
+                if project_path.exists():
+                    try:
+                        chats_path.rmdir()
+                    except Exception:
+                        pass
+
+                    try:
+                        project_path.rmdir()
+                    except Exception:
+                        pass
+
+                raise
+
+            self.send_json(
+                201,
+                {
+                    "status": "created",
+                    "id": project_id,
+                    "name": name,
+                    "folder": project_folder_name
+                }
+            )
+
+        except json.JSONDecodeError:
+            self.send_json(
+                400,
+                {"error": "invalid JSON"}
+            )
+
+        except OverflowError as error:
+            self.send_json(
+                413,
+                {"error": str(error)}
+            )
+
+        except ValueError as error:
+            self.send_json(
+                400,
+                {"error": str(error)}
+            )
+
+        except Exception as error:
+            self.send_json(
+                500,
+                {"error": str(error)}
+            )
+
+
     def handle_save(self):
 
         try:
@@ -539,6 +721,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
 
                 return
 
+
             if not isinstance(
                 content,
                 str
@@ -554,11 +737,13 @@ class ConnectorHandler(BaseHTTPRequestHandler):
 
                 return
 
+
             destination = self.save_file(
                 PROJECTS_FOLDER,
                 filename,
                 content
             )
+
 
             self.send_json(
                 201,
@@ -570,6 +755,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 }
             )
 
+
         except json.JSONDecodeError:
 
             self.send_json(
@@ -580,6 +766,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 }
             )
 
+
         except OverflowError as error:
 
             self.send_json(
@@ -588,6 +775,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                     "error": str(error)
                 }
             )
+
 
         except FileExistsError:
 
@@ -599,6 +787,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 }
             )
 
+
         except ValueError as error:
 
             self.send_json(
@@ -607,6 +796,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                     "error": str(error)
                 }
             )
+
 
         except Exception as error:
 
@@ -641,6 +831,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 DEFAULT_PROJECT
             )
 
+
             if not isinstance(
                 title,
                 str
@@ -655,6 +846,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 )
 
                 return
+
 
             if not isinstance(
                 url,
@@ -671,6 +863,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
 
                 return
 
+
             if not isinstance(
                 messages,
                 list
@@ -686,6 +879,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
 
                 return
 
+
             if not messages:
 
                 self.send_json(
@@ -697,6 +891,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 )
 
                 return
+
 
             if not isinstance(
                 project_id,
@@ -713,7 +908,13 @@ class ConnectorHandler(BaseHTTPRequestHandler):
 
                 return
 
-            project_id = project_id.strip().upper()
+
+            project_id = (
+                project_id
+                .strip()
+                .upper()
+            )
+
 
             for message in messages:
 
@@ -732,6 +933,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
 
                     return
 
+
                 if not isinstance(
                     message.get("role"),
                     str
@@ -746,6 +948,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                     )
 
                     return
+
 
                 if not isinstance(
                     message.get("content"),
@@ -762,29 +965,41 @@ class ConnectorHandler(BaseHTTPRequestHandler):
 
                     return
 
-            project_folder_path = project_folder(
-                project_id
+
+            project_folder_path = (
+                project_folder(
+                    project_id
+                )
             )
 
-            conversation_id = next_conversation_id(
-                project_id
+
+            conversation_id = (
+                next_conversation_id(
+                    project_id
+                )
             )
+
 
             clean_title = sanitize_title(
                 title
             )
 
-            markdown = build_conversation_markdown(
-                conversation_id,
-                clean_title,
-                project_id,
-                messages
+
+            markdown = (
+                build_conversation_markdown(
+                    conversation_id,
+                    clean_title,
+                    project_id,
+                    messages
+                )
             )
+
 
             filename = (
                 f"{conversation_id} - "
                 f"{clean_title}.md"
             )
+
 
             if len(filename) > 200:
 
@@ -793,11 +1008,13 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                     f"{clean_title[:170]}.md"
                 )
 
+
             destination = self.save_file(
                 project_folder_path / "Chats",
                 filename,
                 markdown
             )
+
 
             self.send_json(
                 201,
@@ -815,6 +1032,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 }
             )
 
+
         except json.JSONDecodeError:
 
             self.send_json(
@@ -825,6 +1043,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 }
             )
 
+
         except OverflowError as error:
 
             self.send_json(
@@ -833,6 +1052,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                     "error": str(error)
                 }
             )
+
 
         except FileExistsError:
 
@@ -844,6 +1064,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 }
             )
 
+
         except ValueError as error:
 
             self.send_json(
@@ -852,6 +1073,7 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                     "error": str(error)
                 }
             )
+
 
         except Exception as error:
 
@@ -906,8 +1128,14 @@ if __name__ == "__main__":
     )
 
     print(
+        "Create project endpoint: "
+        "POST http://127.0.0.1:8765/projects"
+    )
+
+    print(
         "Press Ctrl+C to stop."
     )
+
 
     server = HTTPServer(
         (HOST, PORT),

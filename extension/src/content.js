@@ -867,7 +867,6 @@ function selectProject() {
                     return;
                 }
 
-
                 if (
                     !response ||
                     !response.ok ||
@@ -887,10 +886,8 @@ function selectProject() {
                     return;
                 }
 
-
                 const projects =
                     response.data.projects;
-
 
                 if (!projects.length) {
 
@@ -903,7 +900,6 @@ function selectProject() {
                     return;
                 }
 
-
                 // ------------------------------------------------
                 // Overlay
                 // ------------------------------------------------
@@ -913,7 +909,6 @@ function selectProject() {
 
                 overlay.id =
                     "chatgpt-obsidian-project-overlay";
-
 
                 overlay.style.position =
                     "fixed";
@@ -935,7 +930,6 @@ function selectProject() {
 
                 overlay.style.justifyContent =
                     "center";
-
 
                 // ------------------------------------------------
                 // Dialog
@@ -968,7 +962,6 @@ function selectProject() {
                 dialog.style.boxShadow =
                     "0 10px 40px rgba(0, 0, 0, 0.4)";
 
-
                 // ------------------------------------------------
                 // Title
                 // ------------------------------------------------
@@ -987,7 +980,6 @@ function selectProject() {
 
                 title.style.marginBottom =
                     "8px";
-
 
                 // ------------------------------------------------
                 // Description
@@ -1010,7 +1002,6 @@ function selectProject() {
 
                 description.style.marginBottom =
                     "16px";
-
 
                 // ------------------------------------------------
                 // Select
@@ -1043,7 +1034,6 @@ function selectProject() {
                 select.style.boxSizing =
                     "border-box";
 
-
                 projects.forEach(
                     project => {
 
@@ -1063,6 +1053,42 @@ function selectProject() {
                     }
                 );
 
+                // ------------------------------------------------
+                // Create Project Button
+                // ------------------------------------------------
+
+                const createProjectButton =
+                    document.createElement("button");
+
+                createProjectButton.type =
+                    "button";
+
+                createProjectButton.textContent =
+                    "+ Create New Project";
+
+                createProjectButton.style.width =
+                    "100%";
+
+                createProjectButton.style.marginTop =
+                    "12px";
+
+                createProjectButton.style.padding =
+                    "9px 14px";
+
+                createProjectButton.style.border =
+                    "1px solid #555";
+
+                createProjectButton.style.borderRadius =
+                    "8px";
+
+                createProjectButton.style.background =
+                    "transparent";
+
+                createProjectButton.style.color =
+                    "#ffffff";
+
+                createProjectButton.style.cursor =
+                    "pointer";
 
                 // ------------------------------------------------
                 // Buttons
@@ -1082,7 +1108,6 @@ function selectProject() {
 
                 buttons.style.marginTop =
                     "20px";
-
 
                 const cancelButton =
                     document.createElement("button");
@@ -1110,7 +1135,6 @@ function selectProject() {
 
                 cancelButton.style.cursor =
                     "pointer";
-
 
                 const saveButton =
                     document.createElement("button");
@@ -1142,6 +1166,111 @@ function selectProject() {
                 saveButton.style.cursor =
                     "pointer";
 
+                // ------------------------------------------------
+                // Create Project
+                // ------------------------------------------------
+
+                createProjectButton.addEventListener(
+                    "click",
+                    () => {
+
+                        const name =
+                            window.prompt(
+                                "Enter the new project name:"
+                            );
+
+                        if (name === null) {
+                            return;
+                        }
+
+                        const projectName =
+                            name.trim();
+
+                        if (!projectName) {
+
+                            window.alert(
+                                "Project name cannot be empty."
+                            );
+
+                            return;
+                        }
+
+                        createProjectButton.disabled =
+                            true;
+
+                        createProjectButton.textContent =
+                            "Creating...";
+
+                        chrome.runtime.sendMessage(
+                            {
+                                action: "create-project",
+                                data: {
+                                    name: projectName
+                                }
+                            },
+                            createResponse => {
+
+                                createProjectButton.disabled =
+                                    false;
+
+                                createProjectButton.textContent =
+                                    "+ Create New Project";
+
+                                if (
+                                    chrome.runtime.lastError
+                                ) {
+                                    window.alert(
+                                        "Unable to create project: " +
+                                        chrome.runtime.lastError.message
+                                    );
+
+                                    return;
+                                }
+
+                                if (
+                                    !createResponse ||
+                                    !createResponse.ok
+                                ) {
+                                    const message =
+                                        createResponse?.data?.error ||
+                                        createResponse?.error ||
+                                        "Unable to create project.";
+
+                                    window.alert(
+                                        message
+                                    );
+
+                                    return;
+                                }
+
+                                const newProject =
+                                    createResponse.data;
+
+                                const option =
+                                    document.createElement("option");
+
+                                option.value =
+                                    newProject.id;
+
+                                option.textContent =
+                                    newProject.name ||
+                                    newProject.id;
+
+                                select.appendChild(
+                                    option
+                                );
+
+                                select.value =
+                                    newProject.id;
+
+                                console.log(
+                                    "ChatGPT Obsidian Connector: project created.",
+                                    newProject
+                                );
+                            }
+                        );
+                    }
+                );
 
                 // ------------------------------------------------
                 // Cancel
@@ -1156,7 +1285,6 @@ function selectProject() {
                         resolve(null);
                     }
                 );
-
 
                 // ------------------------------------------------
                 // Save
@@ -1176,7 +1304,6 @@ function selectProject() {
                         );
                     }
                 );
-
 
                 // ------------------------------------------------
                 // Assemble dialog
@@ -1203,6 +1330,10 @@ function selectProject() {
                 );
 
                 dialog.appendChild(
+                    createProjectButton
+                );
+
+                dialog.appendChild(
                     buttons
                 );
 
@@ -1214,13 +1345,11 @@ function selectProject() {
                     overlay
                 );
 
-
                 // ------------------------------------------------
                 // Focus
                 // ------------------------------------------------
 
                 select.focus();
-
 
                 console.log(
                     "ChatGPT Obsidian Connector: project selector displayed.",

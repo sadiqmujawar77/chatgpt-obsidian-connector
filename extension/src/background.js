@@ -145,7 +145,50 @@ chrome.runtime.onMessage.addListener(
 
             return true;
         }
+        // ----------------------------------------------------
+        // Create a new project
+        // ----------------------------------------------------
 
+        if (message.action === "create-project") {
+
+            fetch(
+                "http://127.0.0.1:8765/projects",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify(
+                        message.data
+                    )
+                }
+            )
+                .then(async response => {
+
+                    const data =
+                        await response.json();
+
+                    sendResponse({
+                        ok: response.ok,
+                        status: response.status,
+                        data
+                    });
+
+                })
+                .catch(error => {
+
+                    sendResponse({
+                        ok: false,
+                        error: error.message
+                    });
+
+                });
+
+            return true;
+        }
 
         // ----------------------------------------------------
         // Legacy extension save test
