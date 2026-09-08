@@ -1326,9 +1326,13 @@ function selectProject() {
                     "click",
                     () => {
 
+                        const conversationTitle =
+                            extractConversation().title || "";
+
                         const name =
                             window.prompt(
-                                "Enter the new project name:"
+                                "Enter the new project name:",
+                                conversationTitle
                             );
 
                         if (name === null) {

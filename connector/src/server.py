@@ -904,6 +904,42 @@ def merge_response_pair(path, incoming_pair):
     )
 
 
+def merge_selected_pair(path, incoming_pair):
+    """
+    Merge one explicitly selected Q/R pair.
+
+    The browser pair index is positional within the currently
+    rendered conversation and may therefore differ from the
+    authoritative index already stored in Obsidian.
+
+    If the same user question already exists, preserve its
+    existing authoritative index.
+
+    If the question is new, retain the supplied pair index so
+    chronological insertion can be performed normally.
+    """
+    content = path.read_text(encoding="utf-8")
+
+    existing_pairs, migrated, legacy_prefix = parse_existing_pairs(content)
+
+    incoming = incoming_pair.copy()
+    fingerprint = incoming["fingerprint"]
+
+    existing_by_fingerprint = {
+        pair["fingerprint"]: pair
+        for pair in existing_pairs
+    }
+
+    existing = existing_by_fingerprint.get(fingerprint)
+
+    if existing is not None:
+        incoming["index"] = existing["index"]
+
+    return merge_conversation_file(
+        path,
+        [incoming]
+    )
+
 def merge_conversation_file(path, incoming_pairs):
     """
     Merge incoming Q/R pairs into an existing conversation.
@@ -1515,10 +1551,10 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 )
                 return
 
-            if capture_mode not in {"full", "response"}:
+            if capture_mode not in {"full", "response", "pair"}:
                 self.send_json(
                     400,
-                    {"error": "capture_mode must be 'full' or 'response'"}
+                    {"error": "capture_mode must be 'full', 'response', or 'pair'"}
                 )
                 return
 
@@ -1547,10 +1583,10 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                     return
                 pairs = messages_to_pairs(messages)
 
-            if capture_mode == "response" and len(pairs) != 1:
+            if capture_mode in {"response", "pair"} and len(pairs) != 1:
                 self.send_json(
                     400,
-                    {"error": "response capture must contain exactly one pair"}
+                    {"error": f"{capture_mode} capture must contain exactly one pair"}
                 )
                 return
 
@@ -1565,6 +1601,11 @@ class ConnectorHandler(BaseHTTPRequestHandler):
             if existing_path:
                 if capture_mode == "response":
                     result = merge_response_pair(
+                        existing_path,
+                        pairs[0]
+                    )
+                elif capture_mode == "pair":
+                    result = merge_selected_pair(
                         existing_path,
                         pairs[0]
                     )
