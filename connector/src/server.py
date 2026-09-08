@@ -1,4 +1,5 @@
-﻿from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -45,6 +46,15 @@ CONVERSATION_ID_PATTERN = re.compile(
     r"^P(\d{3,})-(\d{3})(?:\s+-\s+.*)?$",
     re.IGNORECASE
 )
+
+
+PAIR_MARKER_PATTERN = re.compile(
+    r"<!-- COC-PAIR: (\d+):([0-9a-f]{64}) -->"
+)
+
+
+CONVERSATION_MARKER = "## Conversation"
+RELATED_MARKER = "\n## Related\n"
 
 
 def project_folder(project_id):
@@ -209,6 +219,7 @@ def previous_conversation(project_id):
 
     return previous_path
 
+
 def update_next_link(
     conversation_path,
     next_link
@@ -228,7 +239,7 @@ def update_next_link(
         f"Updating Next link: {conversation_path.name}"
     )
 
-    related_marker = "\n## Related\n"
+    related_marker = RELATED_MARKER
 
     if related_marker not in content:
 
@@ -277,10 +288,11 @@ def update_next_link(
         f"Next link target: {next_link}"
     )
 
-    conversation_path.write_text(
-        updated_content,
-        encoding="utf-8"
+    atomic_write_text(
+        conversation_path,
+        updated_content
     )
+
 
 def update_project_index(project_id):
     project_path = project_folder(project_id)
@@ -296,6 +308,7 @@ def update_project_index(project_id):
     for chat_path in chat_folder.glob(
         f"{project_id}-*.md"
     ):
+
         match = CONVERSATION_ID_PATTERN.fullmatch(
             chat_path.stem
         )
@@ -398,10 +411,11 @@ def update_project_index(project_id):
             ""
         ])
 
-    index_path.write_text(updated, encoding="utf-8")
+    atomic_write_text(index_path, updated)
 
     print(f"Project index updated: {index_path}")
     print(f"Conversation entries: {len(conversations)}")
+
 
 def sanitize_title(title):
     title = title.strip()
@@ -429,12 +443,171 @@ def sanitize_title(title):
     return title
 
 
+def atomic_write_text(path, content):
+    """Write UTF-8 text atomically to an existing or new path."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    fd, temp_name = tempfile.mkstemp(
+        prefix=".chatgpt-",
+        suffix=".tmp",
+        dir=str(path.parent)
+    )
+
+    try:
+        with os.fdopen(
+            fd,
+            "w",
+            encoding="utf-8",
+            newline=""
+        ) as temp_file:
+            temp_file.write(content)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+
+        os.replace(temp_name, path)
+
+    except Exception:
+        try:
+            os.unlink(temp_name)
+        except OSError:
+            pass
+        raise
+
+
+def user_fingerprint(content):
+    normalized = content.strip()
+    return hashlib.sha256(
+        normalized.encode("utf-8")
+    ).hexdigest()
+
+
+def normalize_pairs(pairs):
+    """
+    Validate and normalize M005-006 Q/R pairs.
+
+    Each pair is:
+        {"index": N, "user": "...", "assistant": "..."}
+    """
+
+    if not isinstance(pairs, list):
+        raise ValueError("pairs must be an array")
+
+    if not pairs:
+        raise ValueError("pairs cannot be empty")
+
+    normalized = []
+    seen_indexes = set()
+
+    for pair in pairs:
+        if not isinstance(pair, dict):
+            raise ValueError("each pair must be an object")
+
+        index = pair.get("index")
+        user = pair.get("user")
+        assistant = pair.get("assistant")
+
+        if not isinstance(index, int) or isinstance(index, bool) or index < 1:
+            raise ValueError("pair index must be a positive integer")
+
+        if index in seen_indexes:
+            raise ValueError(f"duplicate pair index: {index}")
+
+        if not isinstance(user, str):
+            raise ValueError("pair user content must be a string")
+
+        if not isinstance(assistant, str):
+            raise ValueError("pair assistant content must be a string")
+
+        seen_indexes.add(index)
+
+        normalized.append({
+            "index": index,
+            "user": user.strip(),
+            "assistant": assistant.strip(),
+            "fingerprint": user_fingerprint(user)
+        })
+
+    normalized.sort(key=lambda item: item["index"])
+    return normalized
+
+
+def messages_to_pairs(messages):
+    """
+    Backward-compatible conversion of the old role/content payload.
+
+    Leading assistant/context messages are ignored for pair capture.
+    A pair is a User message followed by its next ChatGPT response.
+    """
+
+    if not isinstance(messages, list):
+        raise ValueError("messages must be an array")
+
+    pairs = []
+    pending_user = None
+
+    for message in messages:
+        if not isinstance(message, dict):
+            raise ValueError("each message must be an object")
+
+        role = message.get("role")
+        content = message.get("content")
+
+        if not isinstance(role, str):
+            raise ValueError("message role must be a string")
+
+        if not isinstance(content, str):
+            raise ValueError("message content must be a string")
+
+        role = role.strip().lower()
+
+        if role == "user":
+            pending_user = content
+            continue
+
+        if role == "assistant" and pending_user is not None:
+            pairs.append({
+                "index": len(pairs) + 1,
+                "user": pending_user,
+                "assistant": content
+            })
+            pending_user = None
+
+    if pending_user is not None:
+        raise ValueError("user message is missing its ChatGPT response")
+
+    if not pairs:
+        raise ValueError("no user/ChatGPT pairs found")
+
+    return normalize_pairs(pairs)
+
+
+def pair_marker(pair):
+    return (
+        f"<!-- COC-PAIR: {pair['index']}:{pair['fingerprint']} -->"
+    )
+
+
+def build_pair_markdown(pair):
+    return "\n".join([
+        pair_marker(pair),
+        "### User",
+        "",
+        pair["user"],
+        "",
+        "### ChatGPT",
+        "",
+        pair["assistant"],
+        ""
+    ])
+
+
 def build_conversation_markdown(
     conversation_id,
     title,
     project_id,
     url,
-    messages,
+    pairs,
     previous_link=None,
     next_link=None,
     project_link=None
@@ -471,33 +644,8 @@ def build_conversation_markdown(
         ""
     ]
 
-    for message in messages:
-
-        role = message.get(
-            "role",
-            "unknown"
-        )
-
-        content = message.get(
-            "content",
-            ""
-        )
-
-        if role == "user":
-            heading = "User"
-
-        elif role == "assistant":
-            heading = "ChatGPT"
-
-        else:
-            heading = role.capitalize()
-
-        lines.extend([
-            f"### {heading}",
-            "",
-            content.strip(),
-            ""
-        ])
+    for pair in pairs:
+        lines.append(build_pair_markdown(pair))
 
     lines.extend([
         "## Related",
@@ -524,6 +672,319 @@ def build_conversation_markdown(
     return "\n".join(lines)
 
 
+def conversation_path_by_url(project_id, url):
+    """Find the existing conversation note for an exact ChatGPT URL."""
+
+    chat_folder = chats_folder(project_id)
+
+    for path in chat_folder.glob(f"{project_id}-*.md"):
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+
+        match = re.search(
+            r"^url:\s*(.*)$",
+            content,
+            re.MULTILINE
+        )
+
+        if match and match.group(1).strip() == url:
+            return path
+
+    return None
+
+
+def parse_existing_pairs(content):
+    """
+    Read generated COC pair markers from a conversation.
+
+    If an older M005-005 conversation has no markers, migrate its
+    User -> ChatGPT sections into numbered pairs while preserving the
+    captured message text.
+    """
+
+    conversation_start = content.find(
+        CONVERSATION_MARKER
+    )
+
+    if conversation_start < 0:
+        raise ValueError("conversation is missing Conversation section")
+
+    related_start = content.rfind(RELATED_MARKER)
+
+    if related_start < 0 or related_start <= conversation_start:
+        raise ValueError("conversation is missing Related section")
+
+    body_start = content.find("\n", conversation_start)
+    if body_start < 0:
+        body_start = len(content)
+    else:
+        body_start += 1
+
+    body = content[body_start:related_start]
+
+    markers = list(PAIR_MARKER_PATTERN.finditer(body))
+
+    if markers:
+        pairs = []
+
+        for position, marker in enumerate(markers):
+            block_start = marker.end()
+            block_end = (
+                markers[position + 1].start()
+                if position + 1 < len(markers)
+                else len(body)
+            )
+
+            block = body[block_start:block_end].strip()
+
+            user_match = re.search(
+                r"^### User\s*\n(.*?)(?=^### ChatGPT\s*$)",
+                block,
+                re.MULTILINE | re.DOTALL
+            )
+            assistant_match = re.search(
+                r"^### ChatGPT\s*\n(.*)$",
+                block,
+                re.MULTILINE | re.DOTALL
+            )
+
+            if not user_match or not assistant_match:
+                raise ValueError(
+                    "invalid COC pair marker block"
+                )
+
+            pairs.append({
+                "index": int(marker.group(1)),
+                "user": user_match.group(1).strip(),
+                "assistant": assistant_match.group(1).strip(),
+                "fingerprint": marker.group(2)
+            })
+
+        return sorted(pairs, key=lambda item: item["index"]), False, ""
+
+    # Legacy M005-005 format: extract User -> ChatGPT sections.
+    headings = list(re.finditer(
+        r"^### (User|ChatGPT)\s*$",
+        body,
+        re.MULTILINE
+    ))
+
+    pairs = []
+    pending_user = None
+    prefix = ""
+
+    if headings and headings[0].start() > 0:
+        prefix = body[:headings[0].start()]
+
+    for position, heading in enumerate(headings):
+        role = heading.group(1)
+        content_start = heading.end()
+        content_end = (
+            headings[position + 1].start()
+            if position + 1 < len(headings)
+            else len(body)
+        )
+        message_content = body[content_start:content_end].strip()
+
+        if role == "User":
+            pending_user = message_content
+        elif role == "ChatGPT" and pending_user is not None:
+            index = len(pairs) + 1
+            pairs.append({
+                "index": index,
+                "user": pending_user,
+                "assistant": message_content,
+                "fingerprint": user_fingerprint(pending_user)
+            })
+            pending_user = None
+        elif role == "ChatGPT":
+            # Preserve any leading assistant/context block that is not
+            # part of a User -> ChatGPT pair.
+            prefix += body[heading.start():content_end]
+
+    if pending_user is not None:
+        raise ValueError("legacy conversation has an unmatched User message")
+
+    if not pairs:
+        raise ValueError("conversation contains no User/ChatGPT pairs")
+
+    return pairs, True, prefix
+
+
+def render_merged_conversation(content, pairs, legacy_prefix=""):
+    """Replace only the generated Conversation body, preserving all other content."""
+
+    conversation_start = content.find(
+        CONVERSATION_MARKER
+    )
+
+    if conversation_start < 0:
+        raise ValueError("conversation is missing Conversation section")
+
+    related_start = content.rfind(RELATED_MARKER)
+
+    if related_start < 0 or related_start <= conversation_start:
+        raise ValueError("conversation is missing Related section")
+
+    body_start = content.find("\n", conversation_start)
+    if body_start < 0:
+        raise ValueError("conversation section is malformed")
+    body_start += 1
+
+    rendered_pairs = []
+
+    for pair in sorted(pairs, key=lambda item: item["index"]):
+        normalized = {
+            "index": pair["index"],
+            "user": pair["user"].strip(),
+            "assistant": pair["assistant"].strip(),
+            "fingerprint": pair.get(
+                "fingerprint",
+                user_fingerprint(pair["user"])
+            )
+        }
+        rendered_pairs.append(
+            build_pair_markdown(normalized)
+        )
+
+    new_body = legacy_prefix.rstrip("\n")
+    if new_body:
+        new_body += "\n\n"
+    new_body += "\n".join(rendered_pairs)
+
+    return (
+        content[:body_start]
+        + new_body
+        + "\n"
+        + content[related_start:]
+    )
+
+
+
+def merge_response_pair(path, incoming_pair):
+    """
+    Merge a single latest-response pair.
+
+    For response capture, the pair index supplied by the browser is only
+    positional within the currently rendered DOM and must not be treated
+    as the conversation's authoritative index.
+
+    If the same user question already exists, preserve its existing index
+    and update its assistant response.
+
+    If the question is new, append it after the current highest pair index.
+    """
+    content = path.read_text(encoding="utf-8")
+
+    existing_pairs, migrated, legacy_prefix = parse_existing_pairs(content)
+
+    incoming = incoming_pair.copy()
+    fingerprint = incoming["fingerprint"]
+
+    existing_by_fingerprint = {
+        pair["fingerprint"]: pair
+        for pair in existing_pairs
+    }
+
+    existing = existing_by_fingerprint.get(fingerprint)
+
+    if existing is not None:
+        incoming["index"] = existing["index"]
+    else:
+        incoming["index"] = max(
+            (pair["index"] for pair in existing_pairs),
+            default=0
+        ) + 1
+
+    return merge_conversation_file(
+        path,
+        [incoming]
+    )
+
+
+def merge_conversation_file(path, incoming_pairs):
+    """
+    Merge incoming Q/R pairs into an existing conversation.
+
+    Existing pairs are never duplicated. A pair with the same question
+    fingerprint and index is updated in place so regenerated responses
+    do not create another pair. Missing pairs are inserted chronologically.
+    """
+
+    content = path.read_text(encoding="utf-8")
+    existing_pairs, migrated, legacy_prefix = parse_existing_pairs(content)
+
+    existing_by_key = {
+        (pair["index"], pair["fingerprint"]): pair
+        for pair in existing_pairs
+    }
+
+    existing_by_fingerprint = {
+        pair["fingerprint"]: pair
+        for pair in existing_pairs
+    }
+
+    added = 0
+    updated = 0
+
+    for incoming in incoming_pairs:
+        key = (
+            incoming["index"],
+            incoming["fingerprint"]
+        )
+
+        if key in existing_by_key:
+            existing = existing_by_key[key]
+            if existing["assistant"] != incoming["assistant"]:
+                existing["assistant"] = incoming["assistant"]
+                updated += 1
+            continue
+
+        if incoming["fingerprint"] in existing_by_fingerprint:
+            existing = existing_by_fingerprint[incoming["fingerprint"]]
+            if existing["index"] != incoming["index"]:
+                raise ValueError(
+                    "pair identity conflict: question exists at a different position"
+                )
+            if existing["assistant"] != incoming["assistant"]:
+                existing["assistant"] = incoming["assistant"]
+                updated += 1
+            continue
+
+        # Same chronological index with a different question is ambiguous;
+        # refuse the merge rather than risking corruption or duplication.
+        if any(
+            pair["index"] == incoming["index"]
+            for pair in existing_pairs
+        ):
+            raise ValueError(
+                f"pair identity conflict at index {incoming['index']}"
+            )
+
+        existing_pairs.append(incoming.copy())
+        existing_by_key[key] = existing_pairs[-1]
+        existing_by_fingerprint[incoming["fingerprint"]] = existing_pairs[-1]
+        added += 1
+
+    updated_content = render_merged_conversation(
+        content,
+        existing_pairs,
+        legacy_prefix=legacy_prefix
+    )
+
+    if updated_content != content:
+        atomic_write_text(path, updated_content)
+
+    return {
+        "added_pairs": added,
+        "updated_pairs": updated,
+        "total_pairs": len(existing_pairs),
+        "migrated_legacy": migrated
+    }
+
+
 class ConnectorHandler(BaseHTTPRequestHandler):
 
     def send_json(
@@ -533,7 +994,8 @@ class ConnectorHandler(BaseHTTPRequestHandler):
     ):
 
         body = json.dumps(
-            data
+            data,
+            ensure_ascii=False
         ).encode("utf-8")
 
         self.send_response(
@@ -553,7 +1015,6 @@ class ConnectorHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         self.wfile.write(body)
-
 
     def read_json_body(self):
 
@@ -581,7 +1042,6 @@ class ConnectorHandler(BaseHTTPRequestHandler):
         return json.loads(
             raw_body.decode("utf-8")
         )
-
 
     def save_file(
         self,
@@ -614,50 +1074,8 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 "file already exists"
             )
 
-        fd, temp_name = tempfile.mkstemp(
-            prefix=".chatgpt-",
-            suffix=".tmp",
-            dir=str(folder)
-        )
-
-        try:
-
-            with os.fdopen(
-                fd,
-                "w",
-                encoding="utf-8",
-                newline=""
-            ) as temp_file:
-
-                temp_file.write(
-                    content
-                )
-
-                temp_file.flush()
-
-                os.fsync(
-                    temp_file.fileno()
-                )
-
-            os.replace(
-                temp_name,
-                destination
-            )
-
-        except Exception:
-
-            try:
-                os.unlink(
-                    temp_name
-                )
-
-            except OSError:
-                pass
-
-            raise
-
+        atomic_write_text(destination, content)
         return destination
-
 
     def do_GET(self):
 
@@ -674,13 +1092,11 @@ class ConnectorHandler(BaseHTTPRequestHandler):
 
             return
 
-
         if self.path == "/projects":
 
             self.handle_projects()
 
             return
-
 
         self.send_json(
             404,
@@ -688,7 +1104,6 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 "error": "not_found"
             }
         )
-
 
     def do_POST(self):
 
@@ -698,13 +1113,11 @@ class ConnectorHandler(BaseHTTPRequestHandler):
 
             return
 
-
         if self.path == "/projects":
 
             self.handle_create_project()
 
             return
-
 
         if self.path == "/conversation":
 
@@ -712,14 +1125,12 @@ class ConnectorHandler(BaseHTTPRequestHandler):
 
             return
 
-
         self.send_json(
             404,
             {
                 "error": "not_found"
             }
         )
-
 
     def handle_projects(self):
 
@@ -779,7 +1190,6 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                     "error": str(error)
                 }
             )
-
 
     def handle_create_project(self):
         try:
@@ -953,7 +1363,6 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 {"error": str(error)}
             )
 
-
     def handle_save(self):
 
         try:
@@ -983,7 +1392,6 @@ class ConnectorHandler(BaseHTTPRequestHandler):
 
                 return
 
-
             if not isinstance(
                 content,
                 str
@@ -999,13 +1407,11 @@ class ConnectorHandler(BaseHTTPRequestHandler):
 
                 return
 
-
             destination = self.save_file(
                 PROJECTS_FOLDER,
                 filename,
                 content
             )
-
 
             self.send_json(
                 201,
@@ -1017,7 +1423,6 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 }
             )
 
-
         except json.JSONDecodeError:
 
             self.send_json(
@@ -1028,7 +1433,6 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 }
             )
 
-
         except OverflowError as error:
 
             self.send_json(
@@ -1037,7 +1441,6 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                     "error": str(error)
                 }
             )
-
 
         except FileExistsError:
 
@@ -1049,7 +1452,6 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 }
             )
 
-
         except ValueError as error:
 
             self.send_json(
@@ -1059,7 +1461,6 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 }
             )
 
-
         except Exception as error:
 
             self.send_json(
@@ -1068,7 +1469,6 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                     "error": str(error)
                 }
             )
-
 
     def handle_conversation(self):
 
@@ -1084,92 +1484,50 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 "url"
             )
 
-            messages = request.get(
-                "messages"
-            )
-
             project_id = request.get(
                 "project",
                 DEFAULT_PROJECT
             )
 
+            capture_mode = request.get(
+                "capture_mode",
+                "full"
+            )
 
-            if not isinstance(
-                title,
-                str
-            ):
-
+            if not isinstance(title, str):
                 self.send_json(
                     400,
-                    {
-                        "error":
-                            "title must be a string"
-                    }
+                    {"error": "title must be a string"}
                 )
-
                 return
 
-
-            if not isinstance(
-                url,
-                str
-            ):
-
+            if not isinstance(url, str):
                 self.send_json(
                     400,
-                    {
-                        "error":
-                            "url must be a string"
-                    }
+                    {"error": "url must be a string"}
                 )
-
                 return
 
-
-            if not isinstance(
-                messages,
-                list
-            ):
-
+            if not url.strip():
                 self.send_json(
                     400,
-                    {
-                        "error":
-                            "messages must be an array"
-                    }
+                    {"error": "url cannot be empty"}
                 )
-
                 return
 
-
-            if not messages:
-
+            if capture_mode not in {"full", "response"}:
                 self.send_json(
                     400,
-                    {
-                        "error":
-                            "messages cannot be empty"
-                    }
+                    {"error": "capture_mode must be 'full' or 'response'"}
                 )
-
                 return
 
-
-            if not isinstance(
-                project_id,
-                str
-            ):
-
+            if not isinstance(project_id, str):
                 self.send_json(
                     400,
-                    {
-                        "error":
-                            "project must be a string"
-                    }
+                    {"error": "project must be a string"}
                 )
-
                 return
-
 
             project_id = (
                 project_id
@@ -1177,67 +1535,66 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 .upper()
             )
 
-
-            for message in messages:
-
-                if not isinstance(
-                    message,
-                    dict
-                ):
-
+            if "pairs" in request:
+                pairs = normalize_pairs(request.get("pairs"))
+            else:
+                messages = request.get("messages")
+                if not isinstance(messages, list):
                     self.send_json(
                         400,
-                        {
-                            "error":
-                                "each message must be an object"
-                        }
+                        {"error": "messages must be an array"}
                     )
-
                     return
+                pairs = messages_to_pairs(messages)
 
-
-                if not isinstance(
-                    message.get("role"),
-                    str
-                ):
-
-                    self.send_json(
-                        400,
-                        {
-                            "error":
-                                "message role must be a string"
-                        }
-                    )
-
-                    return
-
-
-                if not isinstance(
-                    message.get("content"),
-                    str
-                ):
-
-                    self.send_json(
-                        400,
-                        {
-                            "error":
-                                "message content must be a string"
-                        }
-                    )
-
-                    return
-
-
-            project_folder_path = (
-                project_folder(
-                    project_id
+            if capture_mode == "response" and len(pairs) != 1:
+                self.send_json(
+                    400,
+                    {"error": "response capture must contain exactly one pair"}
                 )
+                return
+
+            project_folder_path = project_folder(project_id)
+            clean_title = sanitize_title(title)
+
+            existing_path = conversation_path_by_url(
+                project_id,
+                url.strip()
             )
+
+            if existing_path:
+                if capture_mode == "response":
+                    result = merge_response_pair(
+                        existing_path,
+                        pairs[0]
+                    )
+                else:
+                    result = merge_conversation_file(
+                        existing_path,
+                        pairs
+                    )
+
+                self.send_json(
+                    200,
+                    {
+                        "status": "updated",
+                        "id": existing_path.stem.split(" - ", 1)[0],
+                        "title": clean_title,
+                        "project": project_id,
+                        "url": url.strip(),
+                        "capture_mode": capture_mode,
+                        "added_pairs": result["added_pairs"],
+                        "updated_pairs": result["updated_pairs"],
+                        "total_pairs": result["total_pairs"],
+                        "migrated_legacy": result["migrated_legacy"],
+                        "path": str(existing_path)
+                    }
+                )
+                return
 
             previous_path = previous_conversation(
                 project_id
             )
-
 
             conversation_id = (
                 next_conversation_id(
@@ -1245,15 +1602,9 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 )
             )
 
-
-            clean_title = sanitize_title(
-                title
-            )
-
             previous_link = None
 
             if previous_path:
-
                 previous_link = previous_path.stem
 
             markdown = (
@@ -1261,27 +1612,23 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                     conversation_id,
                     clean_title,
                     project_id,
-                    url,
-                    messages,
+                    url.strip(),
+                    pairs,
                     previous_link=previous_link,
                     project_link=f"{project_id} - Project Index"
                 )
             )
-
 
             filename = (
                 f"{conversation_id} - "
                 f"{clean_title}.md"
             )
 
-
             if len(filename) > 200:
-
                 filename = (
                     f"{conversation_id} - "
                     f"{clean_title[:170]}.md"
                 )
-
 
             destination = self.save_file(
                 project_folder_path / "Chats",
@@ -1290,87 +1637,61 @@ class ConnectorHandler(BaseHTTPRequestHandler):
             )
 
             if previous_path:
-
-
                 update_next_link(
-                previous_path,
-                destination.stem
-            )
-
+                    previous_path,
+                    destination.stem
+                )
 
             update_project_index(
                 project_id
             )
 
-
             self.send_json(
                 201,
                 {
-                    "status": "saved",
+                    "status": "created",
                     "id": conversation_id,
                     "title": clean_title,
                     "project": project_id,
-                    "url": url,
-                    "message_count":
-                        len(messages),
-                    "path": str(
-                        destination
-                    )
+                    "url": url.strip(),
+                    "capture_mode": capture_mode,
+                    "added_pairs": len(pairs),
+                    "updated_pairs": 0,
+                    "total_pairs": len(pairs),
+                    "migrated_legacy": False,
+                    "path": str(destination)
                 }
             )
-
 
         except json.JSONDecodeError:
-
             self.send_json(
                 400,
-                {
-                    "error":
-                        "invalid JSON"
-                }
+                {"error": "invalid JSON"}
             )
-
 
         except OverflowError as error:
-
             self.send_json(
                 413,
-                {
-                    "error": str(error)
-                }
+                {"error": str(error)}
             )
-
 
         except FileExistsError:
-
             self.send_json(
                 409,
-                {
-                    "error":
-                        "file already exists"
-                }
+                {"error": "file already exists"}
             )
-
 
         except ValueError as error:
-
             self.send_json(
                 400,
-                {
-                    "error": str(error)
-                }
+                {"error": str(error)}
             )
-
 
         except Exception as error:
-
             self.send_json(
                 500,
-                {
-                    "error": str(error)
-                }
+                {"error": str(error)}
             )
-
 
     def log_message(
         self,
@@ -1422,7 +1743,6 @@ if __name__ == "__main__":
     print(
         "Press Ctrl+C to stop."
     )
-
 
     server = HTTPServer(
         (HOST, PORT),

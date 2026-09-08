@@ -579,6 +579,78 @@ function extractConversation() {
     };
 }
 
+// Convert the extracted role/content stream into stable chronological
+// User -> ChatGPT pairs for M005-006 selective/incremental capture.
+function messagesToPairs(messages) {
+    const pairs = [];
+    let currentUser = null;
+
+    for (const message of messages) {
+        const role = message?.role;
+        const content = typeof message?.content === "string"
+            ? message.content.trim()
+            : "";
+
+        if (role === "user") {
+            if (currentUser !== null) {
+                pairs.push({
+                    index: pairs.length + 1,
+                    user: currentUser,
+                    assistant: ""
+                });
+            }
+
+            currentUser = content;
+            continue;
+        }
+
+        if (role === "assistant" && currentUser !== null) {
+            pairs.push({
+                index: pairs.length + 1,
+                user: currentUser,
+                assistant: content
+            });
+            currentUser = null;
+        }
+    }
+
+    // Preserve a final unanswered user message as a pair with an empty
+    // assistant response. This keeps the capture lossless if the user saves
+    // while ChatGPT is still generating.
+    if (currentUser !== null) {
+        pairs.push({
+            index: pairs.length + 1,
+            user: currentUser,
+            assistant: ""
+        });
+    }
+
+    return pairs;
+}
+
+function buildCaptureData(conversation, captureMode) {
+    const pairs = messagesToPairs(conversation.messages || []);
+
+    if (captureMode === "response") {
+        if (!pairs.length) {
+            return {
+                captureMode,
+                pairs: []
+            };
+        }
+
+        return {
+            captureMode,
+            pairs: [pairs[pairs.length - 1]]
+        };
+    }
+
+    return {
+        captureMode: "full",
+        pairs
+    };
+}
+
 
 // ------------------------------------------------------------
 // Window message bridge
@@ -736,6 +808,17 @@ function createSaveButton() {
     button.textContent =
         "Save to Obsidian";
 
+    const responseButton =
+        document.createElement("button");
+
+    responseButton.id =
+        "chatgpt-obsidian-save-response-button";
+
+    responseButton.type = "button";
+
+    responseButton.textContent =
+        "Save Latest Response";
+
 
     // --------------------------------------------------------
     // Position
@@ -744,6 +827,13 @@ function createSaveButton() {
     button.style.position = "fixed";
     button.style.right = "24px";
     button.style.bottom = "24px";
+
+    responseButton.style.position = "fixed";
+    responseButton.style.right = "24px";
+    responseButton.style.bottom = "70px";
+
+    responseButton.style.zIndex =
+        "2147483647";
 
     button.style.zIndex =
         "2147483647";
@@ -786,6 +876,39 @@ function createSaveButton() {
     button.style.transition =
         "opacity 0.15s ease, transform 0.15s ease";
 
+    responseButton.style.padding =
+        "9px 14px";
+
+    responseButton.style.border =
+        "1px solid rgba(255,255,255,0.2)";
+
+    responseButton.style.borderRadius =
+        "10px";
+
+    responseButton.style.background =
+        "#202123";
+
+    responseButton.style.color =
+        "#ffffff";
+
+    responseButton.style.fontFamily =
+        '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+
+    responseButton.style.fontSize =
+        "13px";
+
+    responseButton.style.fontWeight =
+        "600";
+
+    responseButton.style.cursor =
+        "pointer";
+
+    responseButton.style.boxShadow =
+        "0 4px 14px rgba(0, 0, 0, 0.25)";
+
+    responseButton.style.transition =
+        "opacity 0.15s ease, transform 0.15s ease";
+
 
     // --------------------------------------------------------
     // Hover
@@ -812,6 +935,26 @@ function createSaveButton() {
         }
     );
 
+    responseButton.addEventListener(
+        "mouseenter",
+        () => {
+
+            if (!responseButton.disabled) {
+                responseButton.style.transform =
+                    "translateY(-1px)";
+            }
+        }
+    );
+
+    responseButton.addEventListener(
+        "mouseleave",
+        () => {
+
+            responseButton.style.transform =
+                "translateY(0)";
+        }
+    );
+
 
     // --------------------------------------------------------
     // Click
@@ -821,12 +964,21 @@ function createSaveButton() {
         "click",
         () => {
 
-            saveCurrentConversation(button);
+            saveCurrentConversation(button, "full");
+        }
+    );
+
+    responseButton.addEventListener(
+        "click",
+        () => {
+
+            saveCurrentConversation(responseButton, "response");
         }
     );
 
 
     document.body.appendChild(button);
+    document.body.appendChild(responseButton);
 
     console.log(
         "ChatGPT Obsidian Connector: Save button added."
@@ -1365,7 +1517,7 @@ function selectProject() {
 // Save current conversation
 // ------------------------------------------------------------
 
-function saveCurrentConversation(button) {
+function saveCurrentConversation(button, captureMode = "full") {
 
     // Prevent accidental double-clicks.
     if (button.disabled) {
@@ -1413,7 +1565,9 @@ function saveCurrentConversation(button) {
                     "1";
 
                 button.textContent =
-                    "Save to Obsidian";
+                    captureMode === "response"
+                        ? "Save Latest Response"
+                        : "Save to Obsidian";
 
                 return;
             }
@@ -1421,7 +1575,8 @@ function saveCurrentConversation(button) {
 
             continueSavingConversation(
                 button,
-                projectId
+                projectId,
+                captureMode
             );
         })
         .catch(error => {
@@ -1451,7 +1606,9 @@ function saveCurrentConversation(button) {
                 () => {
 
                     button.textContent =
-                        "Save to Obsidian";
+                        captureMode === "response"
+                            ? "Save Latest Response"
+                            : "Save to Obsidian";
 
                     button.style.background =
                         "#2f6fed";
@@ -1468,7 +1625,8 @@ function saveCurrentConversation(button) {
 
 function continueSavingConversation(
     button,
-    projectId
+    projectId,
+    captureMode = "full"
 ) {
 
     console.log(
@@ -1482,7 +1640,9 @@ function continueSavingConversation(
     // --------------------------------------------------------
 
     button.textContent =
-        "Saving…";
+        captureMode === "response"
+            ? "Saving response…"
+            : "Saving…";
 
 
     // --------------------------------------------------------
@@ -1497,13 +1657,19 @@ function continueSavingConversation(
     conversation.project =
         projectId;
 
+    const capture =
+        buildCaptureData(
+            conversation,
+            captureMode
+        );
+
 
     // --------------------------------------------------------
     // Empty conversation
     // --------------------------------------------------------
 
     if (
-        !conversation.messages.length
+        !capture.pairs.length
     ) {
 
         button.disabled = false;
@@ -1550,7 +1716,11 @@ function continueSavingConversation(
     chrome.runtime.sendMessage(
         {
             action: "extract",
-            data: conversation
+            data: {
+                ...conversation,
+                capture_mode: capture.captureMode,
+                pairs: capture.pairs
+            }
         },
         response => {
 
@@ -1597,17 +1767,32 @@ function continueSavingConversation(
             if (
                 response &&
                 response.ok &&
-                response.status === 201
+                (
+                    response.status === 200 ||
+                    response.status === 201
+                )
             ) {
 
                 const id =
                     response.data?.id;
 
 
+                const savedMode =
+                    response.data?.capture_mode ||
+                    captureMode;
+
                 button.textContent =
                     id
-                        ? `✓ Saved ${id}`
-                        : "✓ Saved to Obsidian";
+                        ? (
+                            savedMode === "response"
+                                ? `✓ Saved response to ${id}`
+                                : `✓ Saved ${id}`
+                        )
+                        : (
+                            savedMode === "response"
+                                ? "✓ Response saved"
+                                : "✓ Saved to Obsidian"
+                        );
 
 
                 button.style.background =
@@ -1692,7 +1877,9 @@ function continueSavingConversation(
                 () => {
 
                     button.textContent =
-                        "Save to Obsidian";
+                        captureMode === "response"
+                            ? "Save Latest Response"
+                            : "Save to Obsidian";
 
                     button.style.background =
                         "#2f6fed";

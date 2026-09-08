@@ -8,7 +8,7 @@ for the project.
 
 ---
 
-## M001 — Obsidian Structure & Project Index
+## M001 â€” Obsidian Structure & Project Index
 
 **Status:** Complete
 
@@ -23,16 +23,16 @@ Created the ChatGPT section:
 
 ```text
 00 - ChatGPT/
-├── Projects/
-├── Technical/
-├── Research/
-├── Health/
-├── Hobby/
-├── Learning/
-└── General/
+â”œâ”€â”€ Projects/
+â”œâ”€â”€ Technical/
+â”œâ”€â”€ Research/
+â”œâ”€â”€ Health/
+â”œâ”€â”€ Hobby/
+â”œâ”€â”€ Learning/
+â””â”€â”€ General/
 ---
 
-## M005-003 — Project Selection & Creation
+## M005-003 â€” Project Selection & Creation
 
 **Status:** Complete
 
@@ -77,7 +77,7 @@ during conversation capture.
 
 ---
 
-## M005-004 — Conversation Document Quality
+## M005-004 â€” Conversation Document Quality
 
 **Status:** Complete
 
@@ -111,7 +111,7 @@ Obsidian Markdown documents with useful source metadata.
 
 ---
 
-## M005-005 — Conversation Relationships & Navigation
+## M005-005 â€” Conversation Relationships & Navigation
 
 **Status:** Complete
 
@@ -146,3 +146,56 @@ Provide automatic navigation between conversations and maintain project-level co
 ### Result
 
 M005-005 passed functional validation and is complete.
+
+---
+
+## M005-006 â€” Selective & Incremental Conversation Capture
+
+**Status: PASS**
+
+Implemented selective and incremental conversation capture.
+
+### Implemented
+
+- Added **Save Latest Response** to the browser extension.
+- Added capture modes:
+  - `full` â€” capture the complete conversation.
+  - `response` â€” capture only the latest User â†’ ChatGPT exchange.
+- Added conversation pair normalization and stable pair markers.
+- Added incremental merging into existing conversation files.
+- Added idempotent response capture so repeated saves do not create duplicates.
+- Added chronological insertion of newly captured pairs.
+- Added existing-conversation detection using the original ChatGPT conversation URL.
+- Preserved existing conversation content during incremental updates.
+- Preserved conversation relationship/navigation metadata.
+- Added response-capture handling for partially rendered ChatGPT conversations.
+- Response capture no longer treats a browser-local pair index as the authoritative conversation index.
+- Existing full-capture pair identity protection remains strict.
+
+### Verification
+
+Server-side testing verified:
+
+- Selective response capture.
+- Incremental capture.
+- Q/R pair preservation.
+- Stable pair identity.
+- Chronological insertion.
+- Duplicate prevention.
+- Full capture followed by incremental response capture.
+- Existing conversation detection.
+
+Browser/Obsidian end-to-end testing verified:
+
+- Extension loads without JavaScript syntax errors.
+- `Save Latest Response` button appears.
+- Project selection works.
+- Response capture reaches the local connector.
+- Connector returns HTTP 200 for response capture.
+- Latest response is written to the correct P001 conversation.
+- Markdown formatting is preserved.
+- Existing `Related` navigation remains present.
+
+### Final Result
+
+**M005-006 PASS â€” Selective & Incremental Conversation Capture is operational end-to-end.**
