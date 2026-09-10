@@ -531,8 +531,25 @@ function htmlToMarkdown(element) {
     // --------------------------------------------------------
     // Convert root element
     // --------------------------------------------------------
+    //
+    // ChatGPT can occasionally place another message element
+    // inside the DOM subtree of the message currently being
+    // extracted. Clone the message first and remove any nested
+    // message-role elements so the converter cannot consume the
+    // following User/Assistant message.
+    //
+    // This keeps the extraction boundary tied to the selected
+    // message instead of relying on ChatGPT's current DOM layout.
 
-    let markdown = Array.from(element.childNodes)
+    const root = element.cloneNode(true);
+
+    root.querySelectorAll(
+        "[data-message-author-role]"
+    ).forEach(nestedMessage => {
+        nestedMessage.remove();
+    });
+
+    let markdown = Array.from(root.childNodes)
         .map(node => convertNode(node, {}))
         .join("");
 
@@ -650,6 +667,274 @@ function buildCaptureData(conversation, captureMode) {
         pairs
     };
 }
+
+
+// ------------------------------------------------------------
+// Selective Q/R capture
+// ------------------------------------------------------------
+
+function saveSelectedPair(button, pair) {
+
+    const originalText = button.textContent;
+
+    button.disabled = true;
+    button.textContent = "Selecting project...";
+
+    const conversation =
+        extractConversation();
+
+    selectProject()
+        .then(project => {
+
+            conversation.project = project;
+
+            button.textContent =
+                "Saving Q/R...";
+
+            chrome.runtime.sendMessage(
+                {
+                    action: "extract",
+                    data: {
+                        ...conversation,
+                        capture_mode: "pair",
+                        pairs: [pair]
+                    }
+                },
+                response => {
+
+                    if (chrome.runtime.lastError) {
+
+                        console.error(
+                            "ChatGPT Obsidian Connector: selective save failed",
+                            chrome.runtime.lastError
+                        );
+
+                        button.disabled = false;
+                        button.textContent = originalText;
+
+                        return;
+                    }
+
+                    if (
+                        !response ||
+                        !response.ok
+                    ) {
+
+                        console.error(
+                            "ChatGPT Obsidian Connector: selective save failed",
+                            response
+                        );
+
+                        button.disabled = false;
+                        button.textContent = originalText;
+
+                        return;
+                    }
+
+                    const data =
+                        response.data || {};
+
+                    const id =
+                        data.id || "";
+
+                    const addedPairs =
+                        Number(data.added_pairs || 0);
+
+                    const updatedPairs =
+                        Number(data.updated_pairs || 0);
+
+                    const checkmark =
+                        "\u2713";
+
+                    if (addedPairs > 0) {
+
+                        button.textContent =
+                            id
+                                ? `${checkmark} Q/R captured - ${id}`
+                                : `${checkmark} Q/R captured`;
+
+                    } else if (updatedPairs > 0) {
+
+                        button.textContent =
+                            id
+                                ? `${checkmark} Q/R updated - ${id}`
+                                : `${checkmark} Q/R updated`;
+
+                    } else {
+
+                        button.textContent =
+                            id
+                                ? `${checkmark} Already captured - ${id}`
+                                : `${checkmark} Already captured`;
+                    }
+
+                    button.style.background =
+                        "#1f7a4d";
+
+                    setTimeout(
+                        () => {
+                            button.disabled = false;
+                        },
+                        4000
+                    );
+                }
+            );
+        })
+        .catch(error => {
+
+            console.error(
+                "ChatGPT Obsidian Connector: selective project/save failed",
+                error
+            );
+
+            button.disabled = false;
+            button.textContent = originalText;
+        });
+}
+
+
+function createSelectivePairButtons() {
+
+    const messages = [
+        ...document.querySelectorAll(
+            "[data-message-author-role]"
+        )
+    ];
+
+    if (messages.length < 2) {
+        return;
+    }
+
+    const pairs = messagesToPairs(
+        messages.map(element => ({
+            role:
+                element.getAttribute(
+                    "data-message-author-role"
+                ),
+            content:
+                htmlToMarkdown(element)
+        }))
+    );
+
+    if (!pairs.length) {
+        return;
+    }
+
+    let pairIndex = 0;
+
+    for (
+        let i = 0;
+        i < messages.length;
+        i++
+    ) {
+
+        const userElement =
+            messages[i];
+
+        if (
+            userElement.getAttribute(
+                "data-message-author-role"
+            ) !== "user"
+        ) {
+            continue;
+        }
+
+        const assistantElement =
+            messages[i + 1];
+
+        if (
+            !assistantElement ||
+            assistantElement.getAttribute(
+                "data-message-author-role"
+            ) !== "assistant"
+        ) {
+            continue;
+        }
+
+        const pair =
+            pairs[pairIndex++];
+
+        if (!pair) {
+            continue;
+        }
+
+        if (
+            assistantElement.parentElement &&
+            assistantElement.parentElement.querySelector(
+                `[data-chatgpt-obsidian-pair-fingerprint="${pair.fingerprint}"]`
+            )
+        ) {
+            continue;
+        }
+
+        const button =
+            document.createElement("button");
+
+        button.type = "button";
+
+        button.dataset.chatgptObsidianPairFingerprint =
+            pair.fingerprint;
+
+        button.textContent =
+            "Save this Q/R";
+
+        button.style.display =
+            "block";
+
+        button.style.marginTop =
+            "8px";
+
+        button.style.marginBottom =
+            "8px";
+
+        button.style.padding =
+            "4px 10px";
+
+        button.style.borderRadius =
+            "6px";
+
+        button.style.border =
+            "1px solid rgba(255,255,255,0.2)";
+
+        button.style.background =
+            "#2f6fed";
+
+        button.style.color =
+            "#ffffff";
+
+        button.style.fontSize =
+            "12px";
+
+        button.style.cursor =
+            "pointer";
+
+        button.style.zIndex =
+            "2147483647";
+
+        button.addEventListener(
+            "click",
+            () => {
+                saveSelectedPair(
+                    button,
+                    pair
+                );
+            }
+        );
+
+        /*
+         * Insert the button AFTER the assistant message element.
+         * Do not append it to the assistant's parent because ChatGPT's
+         * current DOM can use that parent as a layout wrapper whose
+         * visual order does not match DOM child order.
+         */
+        assistantElement.insertAdjacentElement(
+            "afterend",
+            button
+        );
+    }
+}
+
+
 
 
 // ------------------------------------------------------------
@@ -1785,18 +2070,56 @@ function continueSavingConversation(
                     response.data?.capture_mode ||
                     captureMode;
 
-                button.textContent =
-                    id
-                        ? (
-                            savedMode === "response"
-                                ? `✓ Saved response to ${id}`
-                                : `✓ Saved ${id}`
-                        )
-                        : (
-                            savedMode === "response"
-                                ? "✓ Response saved"
-                                : "✓ Saved to Obsidian"
-                        );
+                const checkmark = "\u2713";
+
+                const addedPairs =
+                    Number(response.data?.added_pairs || 0);
+
+                const updatedPairs =
+                    Number(response.data?.updated_pairs || 0);
+
+                if (savedMode === "response") {
+
+                    if (addedPairs > 0) {
+                        button.textContent =
+                            id
+                                ? `${checkmark} Saved response to ${id}`
+                                : `${checkmark} Response saved`;
+
+                    } else if (updatedPairs > 0) {
+                        button.textContent =
+                            id
+                                ? `${checkmark} Updated response in ${id}`
+                                : `${checkmark} Response updated`;
+
+                    } else {
+                        button.textContent =
+                            id
+                                ? `${checkmark} Response already captured in ${id}`
+                                : `${checkmark} Response already captured`;
+                    }
+
+                } else {
+
+                    if (addedPairs > 0) {
+                        button.textContent =
+                            id
+                                ? `${checkmark} Saved ${id}`
+                                : `${checkmark} Saved to Obsidian`;
+
+                    } else if (updatedPairs > 0) {
+                        button.textContent =
+                            id
+                                ? `${checkmark} Updated ${id}`
+                                : `${checkmark} Conversation updated`;
+
+                    } else {
+                        button.textContent =
+                            id
+                                ? `${checkmark} Already captured ${id}`
+                                : `${checkmark} Already captured`;
+                    }
+                }
 
 
                 button.style.background =
@@ -1901,9 +2224,59 @@ function continueSavingConversation(
 
 function initializeSaveButton() {
 
-    if (document.body) {
-        createSaveButton();
+    if (!document.body) {
+        return;
     }
+
+    createSaveButton();
+
+    let selectivePairRefreshTimer = null;
+
+    function scheduleSelectivePairButtons() {
+
+        if (
+            selectivePairRefreshTimer !== null
+        ) {
+            return;
+        }
+
+        selectivePairRefreshTimer =
+            setTimeout(
+                () => {
+
+                    selectivePairRefreshTimer =
+                        null;
+
+                    try {
+                        createSelectivePairButtons();
+                    } catch (error) {
+
+                        console.error(
+                            "ChatGPT Obsidian Connector: selective pair button error",
+                            error
+                        );
+                    }
+                },
+                150
+            );
+    }
+
+    scheduleSelectivePairButtons();
+
+    const observer =
+        new MutationObserver(
+            () => {
+                scheduleSelectivePairButtons();
+            }
+        );
+
+    observer.observe(
+        document.body,
+        {
+            childList: true,
+            subtree: true
+        }
+    );
 }
 
 

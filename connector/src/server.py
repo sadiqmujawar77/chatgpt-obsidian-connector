@@ -49,7 +49,7 @@ CONVERSATION_ID_PATTERN = re.compile(
 
 
 PAIR_MARKER_PATTERN = re.compile(
-    r"<!-- COC-PAIR: (\d+):([0-9a-f]{64}) -->"
+    r'(?:<!-- COC-PAIR: |%% COC-PAIR: |<span data-coc-pair=")(\d+):([0-9a-f]{64})(?: -->| %%|"></span>)'
 )
 
 
@@ -584,14 +584,13 @@ def messages_to_pairs(messages):
 
 def pair_marker(pair):
     return (
-        f"<!-- COC-PAIR: {pair['index']}:{pair['fingerprint']} -->"
+        f'<span data-coc-pair="{pair["index"]}:{pair["fingerprint"]}"></span>'
     )
 
 
 def build_pair_markdown(pair):
     return "\n".join([
-        pair_marker(pair),
-        "### User",
+        f"### User {pair_marker(pair)}",
         "",
         pair["user"],
         "",
@@ -730,7 +729,19 @@ def parse_existing_pairs(content):
         pairs = []
 
         for position, marker in enumerate(markers):
-            block_start = marker.end()
+            marker_line_start = body.rfind("\n", 0, marker.start()) + 1
+            marker_line_prefix = body[marker_line_start:marker.start()]
+
+            if marker_line_prefix.strip() == "":
+                # Legacy marker on its own line:
+                # <!-- COC-PAIR: ... -->
+                # ### User
+                block_start = marker.end()
+            else:
+                # Current marker embedded in the User heading:
+                # ### User <!-- COC-PAIR: ... -->
+                block_start = marker_line_start
+
             block_end = (
                 markers[position + 1].start()
                 if position + 1 < len(markers)
@@ -740,7 +751,7 @@ def parse_existing_pairs(content):
             block = body[block_start:block_end].strip()
 
             user_match = re.search(
-                r"^### User\s*\n(.*?)(?=^### ChatGPT\s*$)",
+                r'^### User(?:\s+(?:<!-- COC-PAIR: \d+:[0-9a-f]{64} -->|%% COC-PAIR: \d+:[0-9a-f]{64} %%|<span data-coc-pair="\d+:[0-9a-f]{64}"></span>))?\s*\n(.*?)(?=^### ChatGPT\s*$)',
                 block,
                 re.MULTILINE | re.DOTALL
             )
@@ -964,44 +975,62 @@ def merge_conversation_file(path, incoming_pairs):
 
     added = 0
     updated = 0
+    next_index = max(
+        (pair["index"] for pair in existing_pairs),
+        default=0
+    ) + 1
 
     for incoming in incoming_pairs:
-        key = (
-            incoming["index"],
-            incoming["fingerprint"]
-        )
+        fingerprint = incoming["fingerprint"]
 
-        if key in existing_by_key:
-            existing = existing_by_key[key]
+        if fingerprint in existing_by_fingerprint:
+            existing = existing_by_fingerprint[fingerprint]
+
+            # The fingerprint identifies the question. The incoming
+            # positional index may be different because ChatGPT can
+            # render only part of a conversation in the browser DOM.
             if existing["assistant"] != incoming["assistant"]:
                 existing["assistant"] = incoming["assistant"]
                 updated += 1
+                # The question fingerprint identifies the
+                # conversation pair. Preserve the authoritative
+                # existing index while updating the assistant response.
+
             continue
 
-        if incoming["fingerprint"] in existing_by_fingerprint:
-            existing = existing_by_fingerprint[incoming["fingerprint"]]
-            if existing["index"] != incoming["index"]:
-                raise ValueError(
-                    "pair identity conflict: question exists at a different position"
-                )
-            if existing["assistant"] != incoming["assistant"]:
-                existing["assistant"] = incoming["assistant"]
-                updated += 1
-            continue
+        incoming_copy = incoming.copy()
 
-        # Same chronological index with a different question is ambiguous;
-        # refuse the merge rather than risking corruption or duplication.
-        if any(
-            pair["index"] == incoming["index"]
+        occupied_indices = {
+            pair["index"]
             for pair in existing_pairs
-        ):
-            raise ValueError(
-                f"pair identity conflict at index {incoming['index']}"
+        }
+
+        if incoming_copy["index"] in occupied_indices:
+            # A partial/virtualized browser capture may reuse an index
+            # already belonging to an existing Q/R. Never overwrite it.
+            # Assign the new question the next available authoritative
+            # index instead.
+            while next_index in occupied_indices:
+                next_index += 1
+
+            incoming_copy["index"] = next_index
+            next_index += 1
+        else:
+            next_index = max(
+                next_index,
+                incoming_copy["index"] + 1
             )
 
-        existing_pairs.append(incoming.copy())
-        existing_by_key[key] = existing_pairs[-1]
-        existing_by_fingerprint[incoming["fingerprint"]] = existing_pairs[-1]
+        existing_pairs.append(incoming_copy)
+        existing_by_key[
+            (
+                incoming_copy["index"],
+                incoming_copy["fingerprint"]
+            )
+        ] = existing_pairs[-1]
+        existing_by_fingerprint[
+            incoming_copy["fingerprint"]
+        ] = existing_pairs[-1]
         added += 1
 
     updated_content = render_merged_conversation(
