@@ -476,7 +476,21 @@ def atomic_write_text(path, content):
 
 
 def user_fingerprint(content):
+    """
+    Return a stable identity for the logical User message.
+
+    Markdown escaping used for Obsidian storage must not change the
+    identity of the underlying question.
+    """
     normalized = content.strip()
+
+    # Treat escaped Markdown punctuation as the same logical text.
+    normalized = re.sub(
+        r"\\([*`_~])",
+        r"\1",
+        normalized
+    )
+
     return hashlib.sha256(
         normalized.encode("utf-8")
     ).hexdigest()
@@ -766,11 +780,25 @@ def parse_existing_pairs(content):
                     "invalid COC pair marker block"
                 )
 
+            assistant_content = assistant_match.group(1).strip()
+
+            # A browser capture can occasionally leave empty User
+            # headings inside the previous assistant message.
+            # They are structural noise, not assistant content.
+            assistant_content = re.sub(
+                r"^### User\s*$",
+                "",
+                assistant_content,
+                flags=re.MULTILINE
+            ).strip()
+
             pairs.append({
                 "index": int(marker.group(1)),
                 "user": user_match.group(1).strip(),
-                "assistant": assistant_match.group(1).strip(),
-                "fingerprint": marker.group(2)
+                "assistant": assistant_content,
+                "fingerprint": user_fingerprint(
+                    user_match.group(1)
+                )
             })
 
         return sorted(pairs, key=lambda item: item["index"]), False, ""
@@ -956,8 +984,8 @@ def merge_conversation_file(path, incoming_pairs):
     Merge incoming Q/R pairs into an existing conversation.
 
     Existing pairs are never duplicated. A pair with the same question
-    fingerprint and index is updated in place so regenerated responses
-    do not create another pair. Missing pairs are inserted chronologically.
+    fingerprint is updated in place so regenerated responses do not
+    create another pair. Missing pairs are inserted chronologically.
     """
 
     content = path.read_text(encoding="utf-8")

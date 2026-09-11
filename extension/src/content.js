@@ -63,7 +63,8 @@ function htmlToMarkdown(element) {
     function convertNode(node, context = {}) {
 
         if (node.nodeType === Node.TEXT_NODE) {
-            return node.nodeValue || "";
+            const text = node.nodeValue || "";
+            return text.replace(/\*/g, "\\*");
         }
 
         if (node.nodeType !== Node.ELEMENT_NODE) {
