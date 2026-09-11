@@ -1808,13 +1808,23 @@ function selectProject() {
 // ------------------------------------------------------------
 
 function saveCurrentConversation(button, captureMode = "full") {
+	
+    const defaultButtonText =
+        captureMode === "response"
+            ? "Save Latest Response"
+            : "Save to Obsidian";
+
+    const defaultButtonBackground =
+        captureMode === "response"
+            ? "#202123"
+            : "#2f6fed";
 
     // Prevent accidental double-clicks.
     if (button.disabled) {
         return;
     }
 
-
+	
     // --------------------------------------------------------
     // Selecting project state
     // --------------------------------------------------------
@@ -1855,9 +1865,7 @@ function saveCurrentConversation(button, captureMode = "full") {
                     "1";
 
                 button.textContent =
-                    captureMode === "response"
-                        ? "Save Latest Response"
-                        : "Save to Obsidian";
+                    defaultButtonText;
 
                 return;
             }
@@ -1896,12 +1904,10 @@ function saveCurrentConversation(button, captureMode = "full") {
                 () => {
 
                     button.textContent =
-                        captureMode === "response"
-                            ? "Save Latest Response"
-                            : "Save to Obsidian";
+                        defaultButtonText;
 
                     button.style.background =
-                        "#2f6fed";
+                        defaultButtonBackground;
                 },
                 4000
             );
@@ -1918,6 +1924,16 @@ function continueSavingConversation(
     projectId,
     captureMode = "full"
 ) {
+
+    const defaultButtonText =
+        captureMode === "response"
+            ? "Save Latest Response"
+            : "Save to Obsidian";
+
+    const defaultButtonBackground =
+        captureMode === "response"
+            ? "#202123"
+            : "#2f6fed";
 
     console.log(
         "ChatGPT Obsidian Connector: saving to project",
@@ -2131,10 +2147,10 @@ function continueSavingConversation(
                     () => {
 
                         button.textContent =
-                            "Save to Obsidian";
+                            defaultButtonText;
 
                         button.style.background =
-                            "#2f6fed";
+                            defaultButtonBackground;
                     },
                     3000
                 );
@@ -2171,10 +2187,10 @@ function continueSavingConversation(
                     () => {
 
                         button.textContent =
-                            "Save to Obsidian";
+                            defaultButtonText;
 
                         button.style.background =
-                            "#2f6fed";
+                            defaultButtonBackground;
                     },
                     4000
                 );
@@ -2210,7 +2226,7 @@ function continueSavingConversation(
                             : "Save to Obsidian";
 
                     button.style.background =
-                        "#2f6fed";
+                        defaultButtonBackground;
                 },
                 3000
             );
