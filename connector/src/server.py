@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import tempfile
 import os
-from datetime import date
+from datetime import date, datetime
 
 
 HOST = "127.0.0.1"
@@ -28,6 +28,52 @@ DEFAULT_PROJECT = "P001"
 
 
 MAX_REQUEST_SIZE = 5 * 1024 * 1024  # 5 MB
+
+
+LOG_FILE = (
+    Path(__file__).resolve().parents[1]
+    / "connector.log"
+)
+
+
+def log_event(level, event, **details):
+    """
+    Write a compact diagnostic event to the connector log.
+
+    Logging must never interfere with connector operation.
+    Conversation contents and request bodies must not be logged.
+    """
+
+    timestamp = datetime.now().astimezone().isoformat(
+        timespec="seconds"
+    )
+
+    detail_text = " ".join(
+        f"{key}={value}"
+        for key, value in details.items()
+    )
+
+    line = (
+        f"{timestamp} | {level.upper()} | {event}"
+        + (f" | {detail_text}" if detail_text else "")
+        + "\n"
+    )
+
+    try:
+        LOG_FILE.parent.mkdir(
+            parents=True,
+            exist_ok=True
+        )
+
+        with LOG_FILE.open(
+            "a",
+            encoding="utf-8"
+        ) as log:
+            log.write(line)
+
+    except Exception:
+        # Diagnostics must never take down the connector.
+        pass
 
 
 FILENAME_PATTERN = re.compile(
@@ -1091,6 +1137,14 @@ class ConnectorHandler(BaseHTTPRequestHandler):
             ensure_ascii=False
         ).encode("utf-8")
 
+        log_event(
+            "INFO" if status_code < 400 else "WARNING",
+            "HTTP response",
+            method=self.command,
+            path=self.path.split("?", 1)[0],
+            status=status_code
+        )
+
         self.send_response(
             status_code
         )
@@ -1672,11 +1726,26 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                         pairs
                     )
 
+                conversation_id = existing_path.stem.split(
+                    " - ", 1
+                )[0]
+
+                log_event(
+                    "INFO",
+                    "Conversation updated",
+                    project=project_id,
+                    conversation=conversation_id,
+                    capture_mode=capture_mode,
+                    added_pairs=result["added_pairs"],
+                    updated_pairs=result["updated_pairs"],
+                    total_pairs=result["total_pairs"]
+                )
+
                 self.send_json(
                     200,
                     {
                         "status": "updated",
-                        "id": existing_path.stem.split(" - ", 1)[0],
+                        "id": conversation_id,
                         "title": clean_title,
                         "project": project_id,
                         "url": url.strip(),
@@ -1744,6 +1813,17 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 project_id
             )
 
+            log_event(
+                "INFO",
+                "Conversation created",
+                project=project_id,
+                conversation=conversation_id,
+                capture_mode=capture_mode,
+                added_pairs=len(pairs),
+                updated_pairs=0,
+                total_pairs=len(pairs)
+            )
+
             self.send_json(
                 201,
                 {
@@ -1762,30 +1842,61 @@ class ConnectorHandler(BaseHTTPRequestHandler):
             )
 
         except json.JSONDecodeError:
+            log_event(
+                "WARNING",
+                "Conversation rejected",
+                status=400,
+                error="invalid JSON"
+            )
             self.send_json(
                 400,
                 {"error": "invalid JSON"}
             )
 
         except OverflowError as error:
+            log_event(
+                "WARNING",
+                "Conversation rejected",
+                status=413,
+                error=str(error)
+            )
             self.send_json(
                 413,
                 {"error": str(error)}
             )
 
         except FileExistsError:
+            log_event(
+                "WARNING",
+                "Conversation conflict",
+                status=409,
+                error="file already exists"
+            )
             self.send_json(
                 409,
                 {"error": "file already exists"}
             )
 
         except ValueError as error:
+            log_event(
+                "WARNING",
+                "Conversation rejected",
+                status=400,
+                error=str(error)
+            )
             self.send_json(
                 400,
                 {"error": str(error)}
             )
 
         except Exception as error:
+            log_event(
+                "ERROR",
+                "Conversation failed",
+                status=500,
+                error=str(error),
+                error_type=type(error).__name__
+            )
             self.send_json(
                 500,
                 {"error": str(error)}

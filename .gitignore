@@ -27,3 +27,4 @@ Thumbs.db
 
 # Temporary connector files
 *.tmp
+connector/connector.log
