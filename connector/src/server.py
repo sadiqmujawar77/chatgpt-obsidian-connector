@@ -1337,6 +1337,16 @@ class ConnectorHandler(BaseHTTPRequestHandler):
 
             return
 
+        if (
+            parsed_url.path.startswith("/projects/")
+            and parsed_url.path.endswith("/search")
+            and parsed_url.query
+        ):
+
+            self.handle_project_search()
+
+            return
+
         self.send_json(
             404,
             {
@@ -1571,6 +1581,177 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 status_code,
                 {
                     "error": message
+                }
+            )
+
+        except Exception as error:
+
+            self.send_json(
+                500,
+                {
+                    "error": str(error)
+                }
+            )
+
+
+    def handle_project_search(self):
+
+        try:
+
+            parsed_url = urlparse(self.path)
+
+            query_values = parse_qs(
+                parsed_url.query,
+                keep_blank_values=True
+            ).get("q", [])
+
+            if len(query_values) != 1:
+                raise ValueError(
+                    "exactly one search query is required"
+                )
+
+            query = query_values[0].strip()
+
+            if not query:
+                raise ValueError(
+                    "search query is required"
+                )
+
+            path_prefix = "/projects/"
+            path_suffix = "/search"
+
+            project_id = parsed_url.path[
+                len(path_prefix):-len(path_suffix)
+            ]
+
+            if not project_id:
+                raise ValueError(
+                    "project id is required"
+                )
+
+            project_path = project_folder(
+                project_id
+            ).resolve()
+
+            query_lower = query.lower()
+            results = []
+
+            for candidate in project_path.rglob("*"):
+
+                if not candidate.is_file():
+                    continue
+
+                try:
+                    resolved = candidate.resolve()
+
+                    resolved.relative_to(
+                        project_path
+                    )
+
+                except ValueError:
+                    continue
+
+                if resolved.suffix.lower() != ".md":
+                    continue
+
+                relative_path = resolved.relative_to(
+                    project_path
+                )
+
+                relative_path_text = (
+                    relative_path.as_posix()
+                )
+
+                filename_match = (
+                    query_lower
+                    in resolved.name.lower()
+                )
+
+                content_matches = []
+
+                try:
+                    content = resolved.read_text(
+                        encoding="utf-8"
+                    )
+                except UnicodeDecodeError:
+                    continue
+                except OSError:
+                    continue
+
+                for line_number, line in enumerate(
+                    content.splitlines(),
+                    start=1
+                ):
+
+                    if query_lower in line.lower():
+
+                        content_matches.append(
+                            {
+                                "line":
+                                    line_number,
+                                "text":
+                                    line[:500]
+                            }
+                        )
+
+                if (
+                    filename_match
+                    or content_matches
+                ):
+
+                    matches = []
+
+                    if filename_match:
+                        matches.append(
+                            {
+                                "type":
+                                    "filename"
+                            }
+                        )
+
+                    for match in content_matches:
+                        matches.append(
+                            {
+                                "type":
+                                    "content",
+                                "line":
+                                    match["line"],
+                                "text":
+                                    match["text"]
+                            }
+                        )
+
+                    results.append(
+                        {
+                            "path":
+                                relative_path_text,
+                            "matches":
+                                matches
+                        }
+                    )
+
+            results.sort(
+                key=lambda item: item["path"].lower()
+            )
+
+            self.send_json(
+                200,
+                {
+                    "project":
+                        project_id.strip().upper(),
+                    "query":
+                        query,
+                    "results":
+                        results
+                }
+            )
+
+        except ValueError as error:
+
+            self.send_json(
+                400,
+                {
+                    "error": str(error)
                 }
             )
 
