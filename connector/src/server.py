@@ -137,6 +137,45 @@ CONVERSATION_MARKER = "## Conversation"
 RELATED_MARKER = "\n## Related\n"
 
 
+def resolve_project_file(project_id, relative_path):
+    """
+    Safely resolve a project-relative Markdown file.
+
+    The returned path must remain inside the resolved project folder.
+    This protects against path traversal and filesystem links that
+    resolve outside the project boundary.
+    """
+    project_path = project_folder(project_id).resolve()
+
+    if not isinstance(relative_path, str):
+        raise ValueError("invalid file path")
+
+    relative_path = relative_path.strip()
+
+    if not relative_path:
+        raise ValueError("file path is required")
+
+    candidate = Path(relative_path)
+
+    if candidate.is_absolute():
+        raise ValueError("file path must be relative")
+
+    candidate_path = (project_path / candidate).resolve()
+
+    try:
+        candidate_path.relative_to(project_path)
+    except ValueError:
+        raise ValueError("file path is outside project")
+
+    if not candidate_path.is_file():
+        raise ValueError("file not found")
+
+    if candidate_path.suffix.lower() != ".md":
+        raise ValueError("only Markdown files are supported")
+
+    return candidate_path
+
+
 def project_folder(project_id):
     """
     Resolve a project ID to its project folder.
@@ -1279,6 +1318,12 @@ class ConnectorHandler(BaseHTTPRequestHandler):
 
             return
 
+        if self.path.startswith("/projects/") and self.path.endswith("/files"):
+
+            self.handle_project_files()
+
+            return
+
         self.send_json(
             404,
             {
@@ -1312,6 +1357,99 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 "error": "not_found"
             }
         )
+
+    def handle_project_files(self):
+
+        try:
+
+            prefix = "/projects/"
+            suffix = "/files"
+
+            project_id = self.path[
+                len(prefix):-len(suffix)
+            ]
+
+            if not project_id:
+                raise ValueError(
+                    "project id is required"
+                )
+
+            project_path = project_folder(
+                project_id
+            ).resolve()
+
+            files = []
+
+            for candidate in project_path.rglob("*"):
+
+                if not candidate.is_file():
+                    continue
+
+                try:
+                    resolved = candidate.resolve()
+
+                    resolved.relative_to(
+                        project_path
+                    )
+
+                except ValueError:
+                    continue
+
+                if resolved.suffix.lower() != ".md":
+                    continue
+
+                relative_path = resolved.relative_to(
+                    project_path
+                )
+
+                stat = resolved.stat()
+
+                files.append(
+                    {
+                        "path": relative_path.as_posix(),
+                        "size": stat.st_size,
+                        "modified": (
+                            datetime.fromtimestamp(
+                                stat.st_mtime
+                            )
+                            .astimezone()
+                            .isoformat()
+                        ),
+                        "type": "markdown"
+                    }
+                )
+
+            files.sort(
+                key=lambda item: item["path"].lower()
+            )
+
+            self.send_json(
+                200,
+                {
+                    "project":
+                        project_id.strip().upper(),
+                    "files": files
+                }
+            )
+
+        except ValueError as error:
+
+            self.send_json(
+                400,
+                {
+                    "error": str(error)
+                }
+            )
+
+        except Exception as error:
+
+            self.send_json(
+                500,
+                {
+                    "error": str(error)
+                }
+            )
+
 
     def handle_projects(self):
 
