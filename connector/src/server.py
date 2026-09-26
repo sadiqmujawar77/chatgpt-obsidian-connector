@@ -1,3 +1,4 @@
+import ctypes
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import hashlib
 import json
@@ -34,6 +35,39 @@ LOG_FILE = (
     Path(__file__).resolve().parents[1]
     / "connector.log"
 )
+
+SINGLE_INSTANCE_MUTEX_NAME = "Global\\ChatGPTObsidianConnector"
+
+
+def acquire_single_instance():
+    """
+    Ensure that only one connector process runs at a time.
+
+    Windows releases the named mutex automatically if the owning
+    process terminates unexpectedly.
+    """
+    kernel32 = ctypes.windll.kernel32
+
+    mutex = kernel32.CreateMutexW(
+        None,
+        False,
+        SINGLE_INSTANCE_MUTEX_NAME
+    )
+
+    if not mutex:
+        raise RuntimeError(
+            "Unable to create connector single-instance mutex"
+        )
+
+    ERROR_ALREADY_EXISTS = 183
+
+    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        kernel32.CloseHandle(mutex)
+        raise RuntimeError(
+            "ChatGPT Obsidian Connector is already running."
+        )
+
+    return mutex
 
 
 def log_event(level, event, **details):
@@ -1953,9 +1987,20 @@ if __name__ == "__main__":
         "Press Ctrl+C to stop."
     )
 
+    try:
+        single_instance_mutex = acquire_single_instance()
+    except RuntimeError as error:
+        print(f"ERROR: {error}")
+        raise SystemExit(1)
+
     server = HTTPServer(
         (HOST, PORT),
         ConnectorHandler
     )
 
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        ctypes.windll.kernel32.CloseHandle(
+            single_instance_mutex
+        )
