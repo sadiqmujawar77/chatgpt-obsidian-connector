@@ -7,6 +7,7 @@ import re
 import tempfile
 import os
 from datetime import date, datetime
+from urllib.parse import parse_qs, urlparse
 
 
 HOST = "127.0.0.1"
@@ -1324,6 +1325,18 @@ class ConnectorHandler(BaseHTTPRequestHandler):
 
             return
 
+        parsed_url = urlparse(self.path)
+
+        if (
+            parsed_url.path.startswith("/projects/")
+            and parsed_url.path.endswith("/file")
+            and parsed_url.query
+        ):
+
+            self.handle_project_file()
+
+            return
+
         self.send_json(
             404,
             {
@@ -1438,6 +1451,126 @@ class ConnectorHandler(BaseHTTPRequestHandler):
                 400,
                 {
                     "error": str(error)
+                }
+            )
+
+        except Exception as error:
+
+            self.send_json(
+                500,
+                {
+                    "error": str(error)
+                }
+            )
+
+
+    def handle_project_file(self):
+
+        try:
+
+            parsed_url = urlparse(self.path)
+
+            path_values = parse_qs(
+                parsed_url.query,
+                keep_blank_values=True
+            ).get("path", [])
+
+            if len(path_values) != 1:
+                raise ValueError(
+                    "exactly one file path is required"
+                )
+
+            path_value = path_values[0]
+
+            if not path_value.strip():
+                raise ValueError(
+                    "file path is required"
+                )
+
+            path_prefix = "/projects/"
+            path_suffix = "/file"
+
+            project_id = parsed_url.path[
+                len(path_prefix):-len(path_suffix)
+            ]
+
+            if not project_id:
+                raise ValueError(
+                    "project id is required"
+                )
+
+            file_path = resolve_project_file(
+                project_id,
+                path_value
+            )
+
+            content = file_path.read_text(
+                encoding="utf-8"
+            )
+
+            stat = file_path.stat()
+
+            relative_path = file_path.relative_to(
+                project_folder(project_id).resolve()
+            )
+
+            self.send_json(
+                200,
+                {
+                    "project":
+                        project_id.strip().upper(),
+                    "path":
+                        relative_path.as_posix(),
+                    "size":
+                        stat.st_size,
+                    "modified":
+                        (
+                            datetime.fromtimestamp(
+                                stat.st_mtime
+                            )
+                            .astimezone()
+                            .isoformat()
+                        ),
+                    "type":
+                        "markdown",
+                    "content":
+                        content
+                }
+            )
+
+        except FileNotFoundError:
+
+            self.send_json(
+                404,
+                {
+                    "error": "file not found"
+                }
+            )
+
+        except UnicodeDecodeError:
+
+            self.send_json(
+                400,
+                {
+                    "error":
+                        "file is not valid UTF-8"
+                }
+            )
+
+        except ValueError as error:
+
+            message = str(error)
+
+            status_code = (
+                404
+                if message == "file not found"
+                else 400
+            )
+
+            self.send_json(
+                status_code,
+                {
+                    "error": message
                 }
             )
 
