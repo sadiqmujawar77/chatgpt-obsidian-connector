@@ -968,6 +968,215 @@ window.addEventListener(
 
 
         // ----------------------------------------------------
+        // Read Obsidian projects
+        // ----------------------------------------------------
+
+        if (event.data.action === "obsidian-projects") {
+
+            chrome.runtime.sendMessage(
+                {
+                    action: "obsidian-projects"
+                },
+                response => {
+
+                    if (chrome.runtime.lastError) {
+                        response = {
+                            ok: false,
+                            error: chrome.runtime.lastError.message
+                        };
+                    }
+
+                    window.postMessage(
+                        {
+                            source:
+                                "chatgpt-obsidian-connector",
+                            type: "obsidian-projects-result",
+                            result: response
+                        },
+                        "*"
+                    );
+                }
+            );
+
+            return;
+        }
+
+
+        // ----------------------------------------------------
+        // Read Obsidian project files
+        // ----------------------------------------------------
+
+        if (event.data.action === "obsidian-files") {
+
+            if (
+                typeof event.data.project !== "string" ||
+                !event.data.project.trim()
+            ) {
+                window.postMessage(
+                    {
+                        source:
+                            "chatgpt-obsidian-connector",
+                        type: "obsidian-files-result",
+                        result: {
+                            ok: false,
+                            error: "project must be a non-empty string"
+                        }
+                    },
+                    "*"
+                );
+
+                return;
+            }
+
+            chrome.runtime.sendMessage(
+                {
+                    action: "obsidian-files",
+                    project: event.data.project
+                },
+                response => {
+
+                    if (chrome.runtime.lastError) {
+                        response = {
+                            ok: false,
+                            error: chrome.runtime.lastError.message
+                        };
+                    }
+
+                    window.postMessage(
+                        {
+                            source:
+                                "chatgpt-obsidian-connector",
+                            type: "obsidian-files-result",
+                            result: response
+                        },
+                        "*"
+                    );
+                }
+            );
+
+            return;
+        }
+
+
+        // ----------------------------------------------------
+        // Read Obsidian project file
+        // ----------------------------------------------------
+
+        if (event.data.action === "obsidian-read") {
+
+            if (
+                typeof event.data.project !== "string" ||
+                !event.data.project.trim() ||
+                typeof event.data.path !== "string" ||
+                !event.data.path.trim()
+            ) {
+                window.postMessage(
+                    {
+                        source:
+                            "chatgpt-obsidian-connector",
+                        type: "obsidian-read-result",
+                        result: {
+                            ok: false,
+                            error: "project and path must be non-empty strings"
+                        }
+                    },
+                    "*"
+                );
+
+                return;
+            }
+
+            chrome.runtime.sendMessage(
+                {
+                    action: "obsidian-read",
+                    project: event.data.project,
+                    path: event.data.path
+                },
+                response => {
+
+                    if (chrome.runtime.lastError) {
+                        response = {
+                            ok: false,
+                            error: chrome.runtime.lastError.message
+                        };
+                    }
+
+                    window.postMessage(
+                        {
+                            source:
+                                "chatgpt-obsidian-connector",
+                            type: "obsidian-read-result",
+                            result: response
+                        },
+                        "*"
+                    );
+                }
+            );
+
+            return;
+        }
+
+
+        // ----------------------------------------------------
+        // Search Obsidian project
+        // ----------------------------------------------------
+
+        if (event.data.action === "obsidian-search") {
+
+            if (
+                typeof event.data.project !== "string" ||
+                !event.data.project.trim() ||
+                typeof event.data.query !== "string" ||
+                !event.data.query.trim()
+            ) {
+                window.postMessage(
+                    {
+                        source:
+                            "chatgpt-obsidian-connector",
+                        type: "obsidian-search-result",
+                        result: {
+                            ok: false,
+                            error: "project and query must be non-empty strings"
+                        }
+                    },
+                    "*"
+                );
+
+                return;
+            }
+
+            chrome.runtime.sendMessage(
+                {
+                    action: "obsidian-search",
+                    project: event.data.project,
+                    query: event.data.query
+                },
+                response => {
+
+                    if (chrome.runtime.lastError) {
+                        response = {
+                            ok: false,
+                            error: chrome.runtime.lastError.message
+                        };
+                    }
+
+                    window.postMessage(
+                        {
+                            source:
+                                "chatgpt-obsidian-connector",
+                            type: "obsidian-search-result",
+                            result: response
+                        },
+                        "*"
+                    );
+                }
+            );
+
+            return;
+        }
+
+
+        // ----------------------------------------------------
         // Extract and save
         // ----------------------------------------------------
 

@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // ChatGPT Obsidian Connector
 // background.js
 // ============================================================
@@ -189,6 +189,206 @@ chrome.runtime.onMessage.addListener(
 
             return true;
         }
+
+        // ----------------------------------------------------
+        // Obsidian read bridge
+        // ----------------------------------------------------
+
+        if (message.action === "obsidian-projects") {
+
+            fetch(
+                "http://127.0.0.1:8765/projects"
+            )
+                .then(async response => {
+
+                    const data = await response.json();
+
+                    sendResponse({
+                        ok: response.ok,
+                        status: response.status,
+                        data
+                    });
+
+                })
+                .catch(error => {
+
+                    sendResponse({
+                        ok: false,
+                        error: error.message
+                    });
+
+                });
+
+            return true;
+        }
+
+
+        if (message.action === "obsidian-files") {
+
+            const project = message.project;
+
+            if (typeof project !== "string" || !project.trim()) {
+
+                sendResponse({
+                    ok: false,
+                    error: "project is required"
+                });
+
+                return true;
+            }
+
+            fetch(
+                "http://127.0.0.1:8765/projects/"
+                + encodeURIComponent(project.trim())
+                + "/files"
+            )
+                .then(async response => {
+
+                    const data = await response.json();
+
+                    sendResponse({
+                        ok: response.ok,
+                        status: response.status,
+                        data
+                    });
+
+                })
+                .catch(error => {
+
+                    sendResponse({
+                        ok: false,
+                        error: error.message
+                    });
+
+                });
+
+            return true;
+        }
+
+
+        if (message.action === "obsidian-read") {
+
+            const project = message.project;
+            const filePath = message.path;
+
+            if (
+                typeof project !== "string" ||
+                !project.trim()
+            ) {
+
+                sendResponse({
+                    ok: false,
+                    error: "project is required"
+                });
+
+                return true;
+            }
+
+            if (
+                typeof filePath !== "string" ||
+                !filePath.trim()
+            ) {
+
+                sendResponse({
+                    ok: false,
+                    error: "path is required"
+                });
+
+                return true;
+            }
+
+            const url =
+                "http://127.0.0.1:8765/projects/"
+                + encodeURIComponent(project.trim())
+                + "/file?path="
+                + encodeURIComponent(filePath.trim());
+
+            fetch(url)
+                .then(async response => {
+
+                    const data = await response.json();
+
+                    sendResponse({
+                        ok: response.ok,
+                        status: response.status,
+                        data
+                    });
+
+                })
+                .catch(error => {
+
+                    sendResponse({
+                        ok: false,
+                        error: error.message
+                    });
+
+                });
+
+            return true;
+        }
+
+
+        if (message.action === "obsidian-search") {
+
+            const project = message.project;
+            const query = message.query;
+
+            if (
+                typeof project !== "string" ||
+                !project.trim()
+            ) {
+
+                sendResponse({
+                    ok: false,
+                    error: "project is required"
+                });
+
+                return true;
+            }
+
+            if (
+                typeof query !== "string" ||
+                !query.trim()
+            ) {
+
+                sendResponse({
+                    ok: false,
+                    error: "query is required"
+                });
+
+                return true;
+            }
+
+            const url =
+                "http://127.0.0.1:8765/projects/"
+                + encodeURIComponent(project.trim())
+                + "/search?q="
+                + encodeURIComponent(query.trim());
+
+            fetch(url)
+                .then(async response => {
+
+                    const data = await response.json();
+
+                    sendResponse({
+                        ok: response.ok,
+                        status: response.status,
+                        data
+                    });
+
+                })
+                .catch(error => {
+
+                    sendResponse({
+                        ok: false,
+                        error: error.message
+                    });
+
+                });
+
+            return true;
+        }
+
 
         // ----------------------------------------------------
         // Legacy extension save test
